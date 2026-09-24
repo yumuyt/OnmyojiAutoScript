@@ -93,9 +93,24 @@ internal static class OasLauncher
             case Mode.Server:
                 return RunServer(root, python);
 
-            default:
+            case Mode.Gui:
                 return StartGui(root, python, opts.Admin, false);
+
+            default:
+                // 默认模式：有 PySide6 就开 GUI，否则退回到能用的 Web 服务
+                if (HasPackage(python, "import PySide6"))
+                {
+                    return StartGui(root, python, opts.Admin, false);
+                }
+                Console.WriteLine("[oas] 未检测到 PySide6，Qt GUI 模式在本仓库不可用（runhey 的 requirements 未包含它）");
+                Console.WriteLine("[oas] 自动改为启动 Web 服务（OASX 面板与浏览器都用这个）");
+                return RunServer(root, python);
         }
+    }
+
+    private static bool HasPackage(Python python, string importStatement)
+    {
+        return RunCapture(python, "-c \"" + importStatement + "\"").Length == 0;
     }
 
     // ====================================================================== 根目录 / python
@@ -272,7 +287,18 @@ internal static class OasLauncher
 
         try
         {
-            Process.Start(info);
+            using (Process proc = Process.Start(info))
+            {
+                // 等几秒看它有没有立刻退出（缺依赖时就是这样，双击的用户否则什么都看不到）
+                System.Threading.Thread.Sleep(3000);
+                if (proc != null && proc.HasExited)
+                {
+                    Console.WriteLine("[oas] GUI 进程启动后立刻退出（exit=" + proc.ExitCode + "）");
+                    Console.WriteLine("[oas] 常见原因：本仓库未安装 PySide6 / fluentui 组件");
+                    Console.WriteLine("[oas] 可改用 Web 模式: oas.exe --server");
+                    return Pause(1);
+                }
+            }
         }
         catch (Exception e)
         {
@@ -290,8 +316,14 @@ internal static class OasLauncher
 
     private static int RunServer(string root, Python python)
     {
-        Console.WriteLine("[oas] 启动 Web 服务（Ctrl+C 结束）");
-        Console.WriteLine("[oas] 面板/浏览器访问: http://127.0.0.1:<config\\deploy.yaml 里的 WebuiPort>");
+        int port = ReadWebuiPort(root);
+        if (!IsPortFree(port))
+        {
+            Console.WriteLine("[oas] 端口 " + port + " 已被占用，OAS 可能已经在运行");
+            Console.WriteLine("[oas] 直接用浏览器/面板访问 http://127.0.0.1:" + port);
+            return Pause(0);
+        }
+        Console.WriteLine("[oas] 启动 Web 服务（Ctrl+C 结束），端口 " + port);
         return RunForeground(root, python, "server.py");
     }
 
@@ -389,10 +421,30 @@ internal static class OasLauncher
 
     private static bool IsPortFree(int port)
     {
+        // 先试着连一下：能连上就说明已经有人在监听（OAS 多半已在运行）
+        try
+        {
+            using (System.Net.Sockets.TcpClient client = new System.Net.Sockets.TcpClient())
+            {
+                IAsyncResult result = client.BeginConnect(IPAddress.Loopback, port, null, null);
+                bool connected = result.AsyncWaitHandle.WaitOne(400) && client.Connected;
+                if (connected)
+                {
+                    client.EndConnect(result);
+                    return false;
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        // 再尝试独占绑定，防止漏判
         TcpListener listener = null;
         try
         {
             listener = new TcpListener(IPAddress.Loopback, port);
+            listener.ExclusiveAddressUse = true;
             listener.Start();
             return true;
         }
@@ -410,11 +462,11 @@ internal static class OasLauncher
     }
 
     // ====================================================================== 参数
-    private enum Mode { Gui, Server, Update, Console, Check }
+    private enum Mode { Auto, Gui, Server, Update, Console, Check }
 
     private sealed class Options
     {
-        public Mode Mode = Mode.Gui;
+        public Mode Mode = Mode.Auto;
         public bool Help;
         public bool Admin;
         public string Root;
@@ -428,6 +480,10 @@ internal static class OasLauncher
                 string a = args[i].ToLowerInvariant();
                 switch (a)
                 {
+                    case "--gui":
+                    case "gui":
+                        o.Mode = Mode.Gui;
+                        break;
                     case "--server":
                     case "-s":
                     case "server":
@@ -478,7 +534,8 @@ internal static class OasLauncher
     {
         Console.WriteLine("OAS 启动器 v" + LauncherVersion);
         Console.WriteLine();
-        Console.WriteLine("  oas.exe                  启动 GUI（等价官方 oas.exe）");
+        Console.WriteLine("  oas.exe                  默认：有 PySide6 就开 GUI，否则启动 Web 服务");
+        Console.WriteLine("  oas.exe --gui            强制启动 GUI");
         Console.WriteLine("  oas.exe --server         启动 Web 服务（OASX 面板连这个）");
         Console.WriteLine("  oas.exe --update         先跑 deploy.installer 再启动 GUI");
         Console.WriteLine("  oas.exe --console        打开带 PATH 的命令行窗口");
