@@ -11,6 +11,10 @@ OASX 兼容层路由汇总
 from fastapi import APIRouter
 
 from module.server.oasx_compat.config_transfer import config_transfer_app
+from module.server.oasx_compat.log_api import error_log_app, log_app
 
 oasx_app = APIRouter()
 oasx_app.include_router(config_transfer_app)
+# 顺序要紧：/logs/errors* 必须在 /logs/{script_name} 之前注册
+oasx_app.include_router(error_log_app)
+oasx_app.include_router(log_app)
