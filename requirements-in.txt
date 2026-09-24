@@ -18,6 +18,8 @@ cn2an==0.5.23
 paho-mqtt==1.6.1
 fastapi==0.104.1
 uvicorn==0.38.0
+# 解析 multipart/form-data（OASX 面板兼容层的配置/任务导入导出接口需要）
+python-multipart==0.0.9
 websockets==13.1
 zerorpc==0.6.3
 pydantic==2.10.0
