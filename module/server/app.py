@@ -15,6 +15,8 @@ from module.logger import logger
 from module.server.home_router import home_app
 from module.server.script_router import script_app
 from module.server.tool_router import tool_app
+# OASX 面板兼容层：全部实现都在新增目录 module/server/oasx_compat/ 下
+from module.server.oasx_compat import oasx_app
 from module.server.setting import State
 from module.server.main_manager import mm
 from starlette.staticfiles import StaticFiles
@@ -44,6 +46,8 @@ app.add_middleware(
 app.include_router(home_app)
 app.include_router(script_app)
 app.include_router(tool_app)
+# 放在最后注册：若上游以后自己实现了同名接口，上游的实现会优先生效，届时可删除兼容层
+app.include_router(oasx_app)
 
 annotator_static_dir = Path(__file__).resolve().parent / "web" / "annotator" / "static"
 if annotator_static_dir.exists():
