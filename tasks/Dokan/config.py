@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from tasks.Component.GeneralBattle.config_general_battle import GeneralBattleConfig
 from tasks.Component.SwitchSoul.switch_soul_config import SwitchSoulConfig
-from tasks.Component.config_base import ConfigBase
+from tasks.Component.config_base import ConfigBase, Time
 from tasks.Component.config_scheduler import Scheduler
 
 
@@ -121,6 +121,10 @@ class DokanConfig(BaseModel):
     # dokan_declare_war: bool = Field(default=False, description='dokan_declare_war_help')
     # # 选择哪一个竂
     # dokan_declear_war_priority: int = Field(default=0, description='dokan_declear_war_priority_help')
+
+    # 内置的道馆开打时间: 每天固定这个时刻开打, 独立于任务自身的 scheduler.server_update,
+    # 排程全部以它为基准并显式传 server=False, 不会被"改成明天 server_update"的逻辑覆盖
+    custom_run_time: Time = Field(default=Time(hour=19, minute=0, second=0), description='dokan_run_time_help')
 
     # 攻击优先顺序: 见习=0,初级=1...
     dokan_attack_priority: int = Field(default=0, description='dokan_attack_priority_help')

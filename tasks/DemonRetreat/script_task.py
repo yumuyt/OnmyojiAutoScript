@@ -18,6 +18,7 @@ from tasks.Component.SwitchSoul.switch_soul import SwitchSoul
 from tasks.DemonRetreat.assets import DemonRetreatAssets
 from tasks.AbyssShadows.assets import AbyssShadowsAssets
 from tasks.DemonRetreat.config import DemonRetreat
+from tasks.Component.activity_window import RETRY_WINDOW, in_retry_window
 
 class ScriptTask(GameUi, GeneralBattle, SwitchSoul, DemonRetreatAssets, AbyssShadowsAssets):
 
@@ -63,7 +64,12 @@ class ScriptTask(GameUi, GeneralBattle, SwitchSoul, DemonRetreatAssets, AbyssSha
             if self.appear_then_click(self.I_DEMON_BACK_CHECK, interval=1):
                 pass
             self.goto_main()
-            self.set_next_run(task='DemonRetreat', finish=False, server=True, success=False)
+            if in_retry_window(datetime.now(), cfg.demon_retreat_time.custom_run_time):
+                # 活动开始后 1 小时内: 按失败间隔重试
+                self.set_next_run(task='DemonRetreat', finish=False, server=True, success=False)
+            else:
+                logger.warning(f"Retry window({RETRY_WINDOW}) exceeded, the next time is next Saturday")
+                self.custom_next_run(task='DemonRetreat', custom_time=cfg.demon_retreat_time.custom_run_time, time_delta=7)
             raise TaskEnd
 
         # 首领退治战斗
@@ -93,8 +99,12 @@ class ScriptTask(GameUi, GeneralBattle, SwitchSoul, DemonRetreatAssets, AbyssSha
         if success:
             logger.info(f"The next time the demon retreat is next Saturday")
             self.custom_next_run(task='DemonRetreat', custom_time=cfg.demon_retreat_time.custom_run_time, time_delta=7)
-        else:
+        elif in_retry_window(datetime.now(), cfg.demon_retreat_time.custom_run_time):
+            # 活动开始后 1 小时内: 按失败间隔重试
             self.set_next_run(task="DemonRetreat", finish=True, server=True, success=False)
+        else:
+            logger.warning(f"Retry window({RETRY_WINDOW}) exceeded, the next time is next Saturday")
+            self.custom_next_run(task='DemonRetreat', custom_time=cfg.demon_retreat_time.custom_run_time, time_delta=7)
 
         raise TaskEnd
 

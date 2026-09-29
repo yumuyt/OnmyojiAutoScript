@@ -12,6 +12,7 @@ from module.base.timer import Timer
 from tasks.GameUi.game_ui import GameUi
 from tasks.GameUi.page import page_guild, page_main
 from tasks.GuildBanquet.assets import GuildBanquetAssets
+from tasks.Component.activity_window import RETRY_WINDOW, in_retry_window
 
 WEEKDAYDICT = {
     0: '星期一',
@@ -117,15 +118,28 @@ class ScriptTask(GameUi, GuildBanquetAssets):
     
     def check_runtime(self) -> bool:
         """
-        检查时间, 一般寮不会晚上10点再开吧。。。。。
+        宴会还没开始时, 只有距离今天的宴会时刻 RETRY_WINDOW(1小时) 以内才继续重试
+
+        超出重试窗口(或今天本来就不是宴会日)则排到下一场宴会并返回 False
         """
 
-        # 如果当日时间超过22点，说明配置时间可能出错，设置下次失败运行时间
-        if datetime.now().hour >= 22:
-            self.set_next_run(task="GuildBanquet", success=False)
-            logger.error("Guild banquet time config error, set next run fail")
+        now = datetime.now()
+        today = now.weekday()
+        if today == self.banquet_day_1:
+            run_time = self.banquet_day_1_start_time
+        elif today == self.banquet_day_2:
+            run_time = self.banquet_day_2_start_time
+        else:
+            logger.info("Today is not a guild banquet day, stop retrying and plan the next banquet")
+            self.plan_next_run()
             return False
-        return True
+
+        if in_retry_window(now, run_time):
+            return True
+
+        logger.warning(f"Retry window({RETRY_WINDOW}) exceeded, plan the next banquet")
+        self.plan_next_run()
+        return False
 
     def plan_next_run(self):
         # 安排次日宴会，便于复用
