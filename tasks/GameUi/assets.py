@@ -43,11 +43,11 @@ class GameUiAssets:
 
 	# Image Rule Assets
 	# description 
-	I_CHECK_MAIN = RuleImage(roi_front=(807,108,76,45), roi_back=(49,98,1033,61), threshold=0.8, method="Template matching", file="./tasks/GameUi/page/page_check_main.png")
+	I_CHECK_MAIN = RuleImage(roi_front=(807,117,76,45), roi_back=(49,86,1033,110), threshold=0.8, method="Template matching", file="./tasks/GameUi/page/page_check_main.png")
 	# 庭院卷轴关闭标识 
 	I_MAIN_SCROLL_CLOSE = RuleImage(roi_front=(1181,634,28,39), roi_back=(1162,595,77,112), threshold=0.8, method="Template matching", file="./tasks/GameUi/page/page_main_scroll_close.png")
 	# description 
-	I_MAIN_GOTO_EXPLORATION = RuleImage(roi_front=(493,116,45,75), roi_back=(243,100,933,211), threshold=0.8, method="Template matching", file="./tasks/GameUi/page/page_main_goto_exploration.png")
+	I_MAIN_GOTO_EXPLORATION = RuleImage(roi_front=(659,117,45,75), roi_back=(243,100,933,211), threshold=0.7, method="Template matching", file="./tasks/GameUi/page/page_main_goto_exploration.png")
 	# description 
 	I_CHECK_EXPLORATION = RuleImage(roi_front=(681,12,27,36), roi_back=(661,0,70,61), threshold=0.65, method="Template matching", file="./tasks/GameUi/page/page_check_exploration.png")
 	# 探索前往觉醒 
@@ -147,21 +147,21 @@ class GameUiAssets:
 
 	# Image Rule Assets
 	# 式神录 
-	I_MAIN_GOTO_SHIKIGAMI_RECORDS = RuleImage(roi_front=(1080,590,56,64), roi_back=(1080,590,120,100), threshold=0.7, method="Template matching", file="./tasks/GameUi/page/page_main_goto_shikigami_records.png")
+	I_MAIN_GOTO_SHIKIGAMI_RECORDS = RuleImage(roi_front=(1098,611,56,64), roi_back=(1080,590,120,100), threshold=0.7, method="Template matching", file="./tasks/GameUi/page/page_main_goto_shikigami_records.png")
 	# description 
-	I_MAIN_GOTO_ONMYODO = RuleImage(roi_front=(960,590,39,36), roi_back=(960,590,120,100), threshold=0.5, method="Template matching", file="./tasks/GameUi/page/page_main_goto_onmyodo.png")
+	I_MAIN_GOTO_ONMYODO = RuleImage(roi_front=(996,618,39,36), roi_back=(960,590,120,100), threshold=0.5, method="Template matching", file="./tasks/GameUi/page/page_main_goto_onmyodo.png")
 	# description 
-	I_MAIN_GOTO_FRIENDS = RuleImage(roi_front=(845,590,55,55), roi_back=(845,590,120,100), threshold=0.7, method="Template matching", file="./tasks/GameUi/page/page_main_goto_friends.png")
+	I_MAIN_GOTO_FRIENDS = RuleImage(roi_front=(878,623,55,55), roi_back=(845,590,120,100), threshold=0.7, method="Template matching", file="./tasks/GameUi/page/page_main_goto_friends.png")
 	# 进入花合战 
-	I_MAIN_GOTO_DAILY = RuleImage(roi_front=(779,612,51,67), roi_back=(754,595,89,97), threshold=0.7, method="Template matching", file="./tasks/GameUi/page/page_main_goto_daily.png")
+	I_MAIN_GOTO_DAILY = RuleImage(roi_front=(779,652,51,27), roi_back=(754,595,89,97), threshold=0.7, method="Template matching", file="./tasks/GameUi/page/page_main_goto_daily.png")
 	# description 
 	I_MAIN_GOTO_MALL = RuleImage(roi_front=(663,661,41,22), roi_back=(644,613,81,78), threshold=0.7, method="Template matching", file="./tasks/GameUi/page/page_main_goto_mall.png")
 	# description 
-	I_MAIN_GOTO_GUILD = RuleImage(roi_front=(495,590,50,22), roi_back=(495,590,120,100), threshold=0.7, method="Template matching", file="./tasks/GameUi/page/page_main_goto_guild.png")
+	I_MAIN_GOTO_GUILD = RuleImage(roi_front=(544,611,50,22), roi_back=(495,590,120,100), threshold=0.7, method="Template matching", file="./tasks/GameUi/page/page_main_goto_guild.png")
 	# description 
-	I_MAIN_GOTO_TEAM = RuleImage(roi_front=(395,590,38,48), roi_back=(395,590,120,100), threshold=0.7, method="Template matching", file="./tasks/GameUi/page/page_main_goto_team.png")
+	I_MAIN_GOTO_TEAM = RuleImage(roi_front=(437,625,38,48), roi_back=(395,590,120,100), threshold=0.7, method="Template matching", file="./tasks/GameUi/page/page_main_goto_team.png")
 	# description 
-	I_MAIN_GOTO_COLLECTION = RuleImage(roi_front=(70,590,36,41), roi_back=(70,590,120,100), threshold=0.7, method="Template matching", file="./tasks/GameUi/page/page_main_goto_collection.png")
+	I_MAIN_GOTO_COLLECTION = RuleImage(roi_front=(92,621,36,41), roi_back=(70,590,120,100), threshold=0.7, method="Template matching", file="./tasks/GameUi/page/page_main_goto_collection.png")
 	# description 
 	I_CHECK_RECORDS = RuleImage(roi_front=(269,71,55,50), roi_back=(269,71,55,50), threshold=0.8, method="Template matching", file="./tasks/GameUi/page/page_check_records.png")
 	# description 
@@ -203,7 +203,7 @@ class GameUiAssets:
 
 	# Image Rule Assets
 	# description 
-	I_MAIN_GOTO_SUMMON = RuleImage(roi_front=(1073,174,57,65), roi_back=(571,153,586,124), threshold=0.8, method="Template matching", file="./tasks/GameUi/page/page_main_goto_summon.png")
+	I_MAIN_GOTO_SUMMON = RuleImage(roi_front=(1073,174,57,65), roi_back=(571,153,586,124), threshold=0.7, method="Template matching", file="./tasks/GameUi/page/page_main_goto_summon.png")
 	# description 
 	I_SUMMON_GOTO_MAIN = RuleImage(roi_front=(27,5,49,51), roi_back=(0,0,100,100), threshold=0.8, method="Template matching", file="./tasks/GameUi/page/page_summon_goto_main.png")
 	# description 
@@ -211,7 +211,7 @@ class GameUiAssets:
 	# 就是一个红叉 
 	I_REALM_RAID_GOTO_EXPLORATION = RuleImage(roi_front=(1192,107,36,43), roi_back=(1192,107,36,43), threshold=0.8, method="Template matching", file="./tasks/GameUi/page/page_realm_raid_goto_exploration.png")
 	# description 
-	I_MAIN_GOTO_TRAVEL = RuleImage(roi_front=(170,590,64,61), roi_back=(170,590,120,100), threshold=0.8, method="Template matching", file="./tasks/GameUi/page/page_main_goto_travel.png")
+	I_MAIN_GOTO_TRAVEL = RuleImage(roi_front=(203,618,64,61), roi_back=(170,590,120,100), threshold=0.8, method="Template matching", file="./tasks/GameUi/page/page_main_goto_travel.png")
 	# 珍旅居 
 	I_CHECK_TRAVEL = RuleImage(roi_front=(1134,583,78,77), roi_back=(1134,583,78,77), threshold=0.8, method="Template matching", file="./tasks/GameUi/page/page_check_travel.png")
 	# 活动列表页前往活动 

@@ -5,7 +5,7 @@
     "roiFront": "1073,174,57,65",
     "roiBack": "571,153,586,124",
     "method": "Template matching",
-    "threshold": 0.8,
+    "threshold": 0.7,
     "description": "description"
   },
   {
@@ -38,7 +38,7 @@
   {
     "itemName": "main_goto_travel",
     "imageName": "page_main_goto_travel.png",
-    "roiFront": "170,590,64,61",
+    "roiFront": "203,618,64,61",
     "roiBack": "170,590,120,100",
     "method": "Template matching",
     "threshold": 0.8,
