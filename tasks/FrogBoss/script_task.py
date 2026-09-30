@@ -24,7 +24,12 @@ from tasks.FrogBoss.config import Strategy
 class ScriptTask(RightActivity, FrogBossAssets, GeneralBattleAssets):
     def run(self):
         self.enter(self.I_FROG_BOSS_ENTER)
+        # 新版（2026-09）：对弈竞猜挂在「活动总览」里，挂牌列点进来可能只到总览页
+        self.enter_panel()
+
         # 进入主界面
+        idle_timer = Timer(30)
+        idle_timer.start()
         while 1:
             self.screenshot()
 
@@ -39,32 +44,76 @@ class ScriptTask(RightActivity, FrogBossAssets, GeneralBattleAssets):
             # 竞猜成功
             if self.appear(self.I_BET_SUCCESS):
                 logger.info('You bet win')
+                idle_timer.reset()
                 self.detect()
-                while 1:
-                    self.screenshot()
-                    if self.appear(self.I_BET_LEFT) and self.appear(self.I_BET_RIGHT):
-                        break
-                    if self.appear_then_click(self.I_BET_SUCCESS_BOX, interval=1):
-                        continue
-                    if self.appear_then_click(self.I_REWARD, interval=2):
-                        continue
-                    if self.appear_then_click(self.I_NEXT_COMPETITION, interval=4):
-                        continue
+                self.goto_next_round()
                 continue
             # 竞猜失败
             if self.appear(self.I_BET_FAILURE):
                 logger.info('You bet lose')
-                self.ui_click_until_disappear(self.I_NEXT_COMPETITION)
+                idle_timer.reset()
                 self.detect()
+                self.goto_next_round()
                 continue
             # 正式竞猜
             if self.appear(self.I_BET_LEFT) and self.appear(self.I_BET_RIGHT):
+                idle_timer.reset()
                 self.do_bet()
                 continue
+            # 上次被中断停在压注页 / 确认弹窗（06/07/08 那种界面）：把这一注下完
+            if self.appear(self.I_BET_SURE) or self.appear(self.I_GOLD_30):
+                idle_timer.reset()
+                self.confirm_bet()
+                continue
+
+            # 停在未知界面（面板没展开 / 活动休息但素材没认出来）时不要一直空转
+            if idle_timer.reached():
+                logger.warning('FrogBoss: 30 秒没有命中任何已知界面，放弃本次运行')
+                break
 
         logger.info('FrogBoss end')
         self.next_run()
         raise TaskEnd('FrogBoss')
+
+    def enter_panel(self) -> bool:
+        """
+        新版「活动总览」：庭院挂牌列点进来后，如果面板还没展开，
+        需要在左栏「精彩活动」里再点一次「对弈竞猜」。
+        已经是下注界面 / 已竞猜 / 休息中就什么都不做。
+        """
+        timer = Timer(20)
+        timer.start()
+        while 1:
+            self.screenshot()
+            if self.appear(self.I_BET_LEFT) or self.appear(self.I_BET_RIGHT) \
+                    or self.appear(self.I_BETTED) or self.appear(self.I_FROG_BOSS_REST):
+                return True
+            if timer.reached():
+                logger.warning('FrogBoss: 20 秒内没有进到对弈竞猜面板')
+                return False
+            if self.appear_then_click(self.I_FROG_BOSS_ENTRY_LIST, interval=2):
+                continue
+
+    def goto_next_round(self, timeout: int = 60) -> bool:
+        """
+        从结算页回到下注界面：先点宝箱开奖励，再点「下一局」。
+        新版结算页是「回放 / 下一局」两个按钮，这里只认右边的 » ，不会误点回放。
+        """
+        timer = Timer(timeout)
+        timer.start()
+        while 1:
+            self.screenshot()
+            if self.appear(self.I_BET_LEFT) and self.appear(self.I_BET_RIGHT):
+                return True
+            if timer.reached():
+                logger.warning(f'FrogBoss: {timeout} 秒内没有回到下注界面')
+                return False
+            if self.appear_then_click(self.I_NEXT_COMPETITION, interval=3):
+                continue
+            if self.appear_then_click(self.I_BET_SUCCESS_BOX, interval=1):
+                continue
+            if self.appear_then_click(self.I_REWARD, interval=2):
+                continue
 
     def next_run(self):
         time = self.config.model.frog_boss.frog_boss_config.before_end_frog
@@ -112,7 +161,17 @@ class ScriptTask(RightActivity, FrogBossAssets, GeneralBattleAssets):
             case _:
                 raise ValueError(f'Unknown bet mode: {self.config.model.frog_boss.frog_boss_config.strategy_frog}')
         logger.info(f'You strategy is {self.config.model.frog_boss.frog_boss_config.strategy_frog} and bet on {click_image}')
-        self.ui_click_until_disappear(click_image)
+        # 点鼓进压注页（鼓消失即说明进去了），加超时，避免点不开时一直点
+        drum_timer = Timer(20)
+        drum_timer.start()
+        while 1:
+            self.screenshot()
+            if not self.appear(click_image):
+                break
+            if drum_timer.reached():
+                logger.warning('FrogBoss: 点鼓 20 秒没有进入压注页，放弃本轮')
+                return
+            self.appear_then_click(click_image, interval=2)
         gold_30_timer = Timer(10)
         gold_30_timer.start()
         while 1:
@@ -125,19 +184,32 @@ class ScriptTask(RightActivity, FrogBossAssets, GeneralBattleAssets):
             if self.appear_then_click(self.I_GOLD_30, interval=3):
                 continue
         # 正式下注
+        self.confirm_bet(flag_glod_30)
+
+    def confirm_bet(self, flag_glod_30: int = 0, timeout: int = 60) -> bool:
+        """
+        在压注页 / 确认弹窗上把这一注下完：选 30 万 → 点右侧大鼓 → 点「确定」，直到出现「已竞猜」。
+        上一次运行被打断停在压注页时，run() 也会调这里把这一注补完。
+        """
         logger.info('Formal bet')
+        bet_timer = Timer(timeout)
+        bet_timer.start()
         while 1:
             self.screenshot()
             if self.appear(self.I_BETTED):
-                break
+                return True
+            if bet_timer.reached():
+                logger.warning(f'FrogBoss: 下注 {timeout} 秒没有结果，放弃本轮')
+                return False
+            # 确认弹窗（「花费30万金币竞猜红方获胜，是否确认」）优先点确定
+            if self.appear_then_click(self.I_UI_CONFIRM, interval=2):
+                continue
+            if self.appear_then_click(self.I_UI_CONFIRM_SAMLL, interval=2):
+                continue
             if self.appear_then_click(self.I_BET_SURE, interval=2) and flag_glod_30 == 1:
                 continue
             if self.appear_then_click(self.I_GOLD_30, interval=2):
                 flag_glod_30 = 1
-                continue
-            if self.appear_then_click(self.I_UI_CONFIRM, interval=2):
-                continue
-            if self.appear_then_click(self.I_UI_CONFIRM_SAMLL, interval=2):
                 continue
 
     def detect(self) -> bool:

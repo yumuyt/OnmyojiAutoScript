@@ -2,8 +2,8 @@
   {
     "itemName": "bet_left",
     "imageName": "fb_bet_left.png",
-    "roiFront": "95,308,145,100",
-    "roiBack": "58,248,245,195",
+    "roiFront": "283,299,132,88",
+    "roiBack": "250,275,250,200",
     "method": "Template matching",
     "threshold": 0.8,
     "description": "左边竞猜"
@@ -11,8 +11,8 @@
   {
     "itemName": "bet_right",
     "imageName": "fb_bet_right.png",
-    "roiFront": "1038,303,146,100",
-    "roiBack": "1012,268,187,208",
+    "roiFront": "1088,300,132,88",
+    "roiBack": "1050,275,220,200",
     "method": "Template matching",
     "threshold": 0.8,
     "description": "右边竞猜"
@@ -20,38 +20,38 @@
   {
     "itemName": "bet_success_box",
     "imageName": "fb_bet_success_box.png",
-    "roiFront": "593,419,87,50",
-    "roiBack": "564,378,140,133",
+    "roiFront": "712,392,84,56",
+    "roiBack": "660,370,200,130",
     "method": "Template matching",
     "threshold": 0.75,
-    "description": "description"
+    "description": "竞猜成功后未开的宝箱（点它开箱）"
   },
   {
     "itemName": "success_left",
     "imageName": "fb_success_left.png",
-    "roiFront": "123,316,100,100",
-    "roiBack": "91,254,202,221",
+    "roiFront": "296,306,96,96",
+    "roiBack": "255,275,180,200",
     "method": "Template matching",
     "threshold": 0.8,
-    "description": "左边赢了"
+    "description": "左边赢了（左鼓上的胜）"
   },
   {
     "itemName": "failure_right",
     "imageName": "fb_failure_right.png",
-    "roiFront": "1063,291,100,100",
-    "roiBack": "993,242,224,199",
+    "roiFront": "1108,308,96,96",
+    "roiBack": "1060,275,200,200",
     "method": "Template matching",
     "threshold": 0.8,
-    "description": "右边输了"
+    "description": "右边输了（右鼓上的败）"
   },
   {
     "itemName": "next_competition",
     "imageName": "fb_next_competition.png",
-    "roiFront": "673,510,42,36",
-    "roiBack": "658,488,91,98",
+    "roiFront": "779,487,40,36",
+    "roiBack": "740,460,120,90",
     "method": "Template matching",
     "threshold": 0.8,
-    "description": "description"
+    "description": "下一局（右边那个 » 按钮；左边是回放，不能点）"
   },
   {
     "itemName": "gold_30",
@@ -60,7 +60,7 @@
     "roiBack": "809,427,147,187",
     "method": "Template matching",
     "threshold": 0.8,
-    "description": "30万金币"
+    "description": "30万金币（压注页第五个红包）"
   },
   {
     "itemName": "bet_sure",
@@ -69,7 +69,7 @@
     "roiBack": "1000,297,200,226",
     "method": "Template matching",
     "threshold": 0.8,
-    "description": "确认竞猜"
+    "description": "确认竞猜（压注页右侧的大鼓）"
   },
   {
     "itemName": "gold_30_check",
@@ -78,51 +78,51 @@
     "roiBack": "402,141,459,489",
     "method": "Template matching",
     "threshold": 0.8,
-    "description": "description"
+    "description": "获胜奖励弹窗里的「猜」金币（说明压注页已选中金额）"
   },
   {
     "itemName": "betted",
     "imageName": "fb_betted.png",
-    "roiFront": "93,352,125,54",
-    "roiBack": "49,283,1192,161",
+    "roiFront": "286,316,136,48",
+    "roiBack": "250,285,220,130",
     "method": "Template matching",
     "threshold": 0.8,
-    "description": "description"
+    "description": "已竞猜（下注完左鼓上的文字）"
   },
   {
     "itemName": "success_right",
     "imageName": "fb_success_right.png",
-    "roiFront": "1048,341,122,116",
-    "roiBack": "999,243,201,260",
+    "roiFront": "1108,308,96,96",
+    "roiBack": "1060,275,200,200",
     "method": "Template matching",
     "threshold": 0.8,
-    "description": "description"
+    "description": "右边赢了（暂无「右鼓显示胜」的样本，模板复用左鼓的胜，只影响日志）"
   },
   {
     "itemName": "failure_left",
     "imageName": "fb_failure_left.png",
-    "roiFront": "116,307,100,100",
-    "roiBack": "76,256,193,219",
+    "roiFront": "296,306,96,96",
+    "roiBack": "255,275,180,200",
     "method": "Template matching",
     "threshold": 0.8,
-    "description": "description"
+    "description": "左边输了（暂无「左鼓显示败」的样本，模板复用右鼓的败，只影响日志）"
   },
   {
     "itemName": "bet_failure",
     "imageName": "fb_bet_failure.png",
-    "roiFront": "496,252,269,72",
-    "roiBack": "439,220,400,152",
+    "roiFront": "773,272,152,64",
+    "roiBack": "600,240,400,130",
     "method": "Template matching",
     "threshold": 0.8,
-    "description": "description"
+    "description": "竞猜失败（只裁「失败」两字，避免和「成功」互相误命中）"
   },
   {
     "itemName": "bet_success",
     "imageName": "fb_bet_success.png",
-    "roiFront": "512,264,260,73",
-    "roiBack": "433,214,418,151",
+    "roiFront": "780,272,152,64",
+    "roiBack": "600,240,400,130",
     "method": "Template matching",
     "threshold": 0.8,
-    "description": "description"
+    "description": "竞猜成功（只裁「成功」两字）"
   }
 ]

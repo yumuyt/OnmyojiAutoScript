@@ -12,48 +12,50 @@ class FrogBossAssets:
 
 	# Image Rule Assets
 	# 左边竞猜 
-	I_BET_LEFT = RuleImage(roi_front=(95,308,145,100), roi_back=(58,248,245,195), threshold=0.8, method="Template matching", file="./tasks/FrogBoss/fb/fb_bet_left.png")
+	I_BET_LEFT = RuleImage(roi_front=(283,299,132,88), roi_back=(250,275,250,200), threshold=0.8, method="Template matching", file="./tasks/FrogBoss/fb/fb_bet_left.png")
 	# 右边竞猜 
-	I_BET_RIGHT = RuleImage(roi_front=(1038,303,146,100), roi_back=(1012,268,187,208), threshold=0.8, method="Template matching", file="./tasks/FrogBoss/fb/fb_bet_right.png")
-	# description 
-	I_BET_SUCCESS_BOX = RuleImage(roi_front=(593,419,87,50), roi_back=(564,378,140,133), threshold=0.75, method="Template matching", file="./tasks/FrogBoss/fb/fb_bet_success_box.png")
-	# 左边赢了 
-	I_SUCCESS_LEFT = RuleImage(roi_front=(123,316,100,100), roi_back=(91,254,202,221), threshold=0.8, method="Template matching", file="./tasks/FrogBoss/fb/fb_success_left.png")
-	# 右边输了 
-	I_FAILURE_RIGHT = RuleImage(roi_front=(1063,291,100,100), roi_back=(993,242,224,199), threshold=0.8, method="Template matching", file="./tasks/FrogBoss/fb/fb_failure_right.png")
-	# description 
-	I_NEXT_COMPETITION = RuleImage(roi_front=(673,510,42,36), roi_back=(658,488,91,98), threshold=0.8, method="Template matching", file="./tasks/FrogBoss/fb/fb_next_competition.png")
-	# 30万金币 
+	I_BET_RIGHT = RuleImage(roi_front=(1088,300,132,88), roi_back=(1050,275,220,200), threshold=0.8, method="Template matching", file="./tasks/FrogBoss/fb/fb_bet_right.png")
+	# 竞猜成功后未开的宝箱（点它开箱） 
+	I_BET_SUCCESS_BOX = RuleImage(roi_front=(712,392,84,56), roi_back=(660,370,200,130), threshold=0.75, method="Template matching", file="./tasks/FrogBoss/fb/fb_bet_success_box.png")
+	# 左边赢了（左鼓上的胜） 
+	I_SUCCESS_LEFT = RuleImage(roi_front=(296,306,96,96), roi_back=(255,275,180,200), threshold=0.8, method="Template matching", file="./tasks/FrogBoss/fb/fb_success_left.png")
+	# 右边输了（右鼓上的败） 
+	I_FAILURE_RIGHT = RuleImage(roi_front=(1108,308,96,96), roi_back=(1060,275,200,200), threshold=0.8, method="Template matching", file="./tasks/FrogBoss/fb/fb_failure_right.png")
+	# 下一局（右边那个 » 按钮；左边是回放，不能点） 
+	I_NEXT_COMPETITION = RuleImage(roi_front=(779,487,40,36), roi_back=(740,460,120,90), threshold=0.8, method="Template matching", file="./tasks/FrogBoss/fb/fb_next_competition.png")
+	# 30万金币（压注页第五个红包） 
 	I_GOLD_30 = RuleImage(roi_front=(858,494,78,76), roi_back=(809,427,147,187), threshold=0.8, method="Template matching", file="./tasks/FrogBoss/fb/fb_gold_30.png")
-	# 确认竞猜 
+	# 确认竞猜（压注页右侧的大鼓） 
 	I_BET_SURE = RuleImage(roi_front=(1025,402,100,100), roi_back=(1000,297,200,226), threshold=0.8, method="Template matching", file="./tasks/FrogBoss/fb/fb_bet_sure.png")
-	# description 
+	# 获胜奖励弹窗里的「猜」金币（说明压注页已选中金额） 
 	I_GOLD_30_CHECK = RuleImage(roi_front=(513,196,58,53), roi_back=(402,141,459,489), threshold=0.8, method="Template matching", file="./tasks/FrogBoss/fb/fb_gold_30_check.png")
-	# description 
-	I_BETTED = RuleImage(roi_front=(93,352,125,54), roi_back=(49,283,1192,161), threshold=0.8, method="Template matching", file="./tasks/FrogBoss/fb/fb_betted.png")
-	# description 
-	I_SUCCESS_RIGHT = RuleImage(roi_front=(1048,341,122,116), roi_back=(999,243,201,260), threshold=0.8, method="Template matching", file="./tasks/FrogBoss/fb/fb_success_right.png")
-	# description 
-	I_FAILURE_LEFT = RuleImage(roi_front=(116,307,100,100), roi_back=(76,256,193,219), threshold=0.8, method="Template matching", file="./tasks/FrogBoss/fb/fb_failure_left.png")
-	# description 
-	I_BET_FAILURE = RuleImage(roi_front=(496,252,269,72), roi_back=(439,220,400,152), threshold=0.8, method="Template matching", file="./tasks/FrogBoss/fb/fb_bet_failure.png")
-	# description 
-	I_BET_SUCCESS = RuleImage(roi_front=(512,264,260,73), roi_back=(433,214,418,151), threshold=0.8, method="Template matching", file="./tasks/FrogBoss/fb/fb_bet_success.png")
+	# 已竞猜（下注完左鼓上的文字） 
+	I_BETTED = RuleImage(roi_front=(286,316,136,48), roi_back=(250,285,220,130), threshold=0.8, method="Template matching", file="./tasks/FrogBoss/fb/fb_betted.png")
+	# 右边赢了（暂无「右鼓显示胜」的样本，模板复用左鼓的胜，只影响日志） 
+	I_SUCCESS_RIGHT = RuleImage(roi_front=(1108,308,96,96), roi_back=(1060,275,200,200), threshold=0.8, method="Template matching", file="./tasks/FrogBoss/fb/fb_success_right.png")
+	# 左边输了（暂无「左鼓显示败」的样本，模板复用右鼓的败，只影响日志） 
+	I_FAILURE_LEFT = RuleImage(roi_front=(296,306,96,96), roi_back=(255,275,180,200), threshold=0.8, method="Template matching", file="./tasks/FrogBoss/fb/fb_failure_left.png")
+	# 竞猜失败（只裁「失败」两字，避免和「成功」互相误命中） 
+	I_BET_FAILURE = RuleImage(roi_front=(773,272,152,64), roi_back=(600,240,400,130), threshold=0.8, method="Template matching", file="./tasks/FrogBoss/fb/fb_bet_failure.png")
+	# 竞猜成功（只裁「成功」两字） 
+	I_BET_SUCCESS = RuleImage(roi_front=(780,272,152,64), roi_back=(600,240,400,130), threshold=0.8, method="Template matching", file="./tasks/FrogBoss/fb/fb_bet_success.png")
 
 
 	# Image Rule Assets
-	# description 
-	I_FROG_BOSS_ENTER = RuleImage(roi_front=(1191,391,36,38), roi_back=(1174,135,78,320), threshold=0.7, method="Template matching", file="./tasks/FrogBoss/fb/fb_frog_boss_enter.png")
-	# 休息中 
+	# 庭院右侧挂牌列的对弈竞猜 
+	I_FROG_BOSS_ENTER = RuleImage(roi_front=(1189,300,36,38), roi_back=(1174,135,78,320), threshold=0.7, method="Template matching", file="./tasks/FrogBoss/fb/fb_frog_boss_enter.png")
+	# 活动总览左栏「精彩活动」里的对弈竞猜（新版入口兜底） 
+	I_FROG_BOSS_ENTRY_LIST = RuleImage(roi_front=(10,242,42,42), roi_back=(0,100,260,480), threshold=0.8, method="Template matching", file="./tasks/FrogBoss/fb/fb_frog_boss_entry_list.png")
+	# 休息中（改版后还没有样本，暂用旧素材，配超时保护兜底） 
 	I_FROG_BOSS_REST = RuleImage(roi_front=(510,274,169,64), roi_back=(492,260,220,113), threshold=0.8, method="Template matching", file="./tasks/FrogBoss/fb/fb_frog_boss_rest.png")
 
 
 	# Ocr Rule Assets
 	# Ocr-description 
-	O_LEFT_COUNT = RuleOcr(roi=(143,496,69,31), area=(143,496,69,31), mode="Digit", method="Default", keyword="", name="left_count")
+	O_LEFT_COUNT = RuleOcr(roi=(335,468,95,32), area=(335,468,95,32), mode="Digit", method="Default", keyword="", name="left_count")
 	# Ocr-description 
-	O_RIGHT_COUNT = RuleOcr(roi=(1105,497,77,32), area=(1105,497,77,32), mode="Digit", method="Default", keyword="", name="right_count")
+	O_RIGHT_COUNT = RuleOcr(roi=(1135,468,95,32), area=(1135,468,95,32), mode="Digit", method="Default", keyword="", name="right_count")
 	# Ocr-description 
-	O_TIME_REMAIN = RuleOcr(roi=(594,564,91,35), area=(594,564,91,35), mode="Duration", method="Default", keyword="", name="time_remain")
+	O_TIME_REMAIN = RuleOcr(roi=(716,534,74,26), area=(716,534,74,26), mode="Duration", method="Default", keyword="", name="time_remain")
 
 

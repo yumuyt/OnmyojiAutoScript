@@ -2,11 +2,20 @@
   {
     "itemName": "frog_boss_enter",
     "imageName": "fb_frog_boss_enter.png",
-    "roiFront": "1191,391,36,38",
+    "roiFront": "1189,300,36,38",
     "roiBack": "1174,135,78,320",
     "method": "Template matching",
     "threshold": 0.7,
-    "description": "description"
+    "description": "庭院右侧挂牌列的对弈竞猜"
+  },
+  {
+    "itemName": "frog_boss_entry_list",
+    "imageName": "fb_frog_boss_entry_list.png",
+    "roiFront": "10,242,42,42",
+    "roiBack": "0,100,260,480",
+    "method": "Template matching",
+    "threshold": 0.8,
+    "description": "活动总览左栏「精彩活动」里的对弈竞猜（新版入口兜底）"
   },
   {
     "itemName": "frog_boss_rest",
@@ -15,6 +24,6 @@
     "roiBack": "492,260,220,113",
     "method": "Template matching",
     "threshold": 0.8,
-    "description": "休息中"
+    "description": "休息中（改版后还没有样本，暂用旧素材，配超时保护兜底）"
   }
 ]
