@@ -184,7 +184,12 @@ from tasks.DailyTrifles.assets import DailyTriflesAssets
 
 # 商店 mall
 page_mall = Page(check_button=[G.I_CHECK_MALL, DailyTriflesAssets.I_ROOM_GIFT])
-page_mall.additional = [G.I_AD_CLOSE_RED, GGA.I_UI_CANCEL_SAMLL, G.I_BACK_Y]
+# 之前这里还带一个 G.I_BACK_Y，但商店页左上角那个返回箭头同时命中
+# I_BACK_Y(0.961)/I_BACK_YOLLOW(0.986)/I_UI_BACK_YELLOW(0.986)——也就是下一页
+# link 用的那个按钮本身。additional 是给弹窗用的，把页面自己的返回键放进去，
+# 结果是 ui_goto(page_mall) 一到店 run_additional 就点它、商店立刻退回庭院
+# （2026-10-01 00:01 oas1/oas2 两次崩溃的触发源：商店签到因此认不出礼包屋）。
+page_mall.additional = [G.I_AD_CLOSE_RED, GGA.I_UI_CANCEL_SAMLL]
 page_mall.link(button=G.I_BACK_YOLLOW, destination=page_main)
 page_main.link(button=G.I_MAIN_GOTO_MALL, destination=page_mall)
 # 阴阳寮 guild
