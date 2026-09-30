@@ -98,7 +98,9 @@ class ScriptTask(RightActivity, FrogBossAssets, GeneralBattleAssets):
         """
         从结算页回到下注界面。顺序必须和上游一致：先开宝箱 / 领奖，最后才点「下一局」——
         反过来写会在「宝箱还没开、下一局已经能点」的时候直接翻页，把奖励跳过去。
-        新版结算页是「回放 / 下一局」两个按钮，这里只认右边的 » ，不会误点回放。
+
+        新版结算页（2026-09 改版）实测：没有独立的领取入口，翻盘奖励是开箱即得，
+        开箱后新增的可交互物只有「回放 / 下一局」两个按钮。这里只认右边的 » ，不会误点回放。
         """
         timer = Timer(timeout)
         timer.start()
@@ -112,6 +114,7 @@ class ScriptTask(RightActivity, FrogBossAssets, GeneralBattleAssets):
             if self.appear_then_click(self.I_BET_SUCCESS_BOX, interval=1):
                 logger.info('FrogBoss: 结算页 -> 开宝箱')
                 continue
+            # 新版界面上这一步点不到（旧素材在新版全图多尺度搜索最高 0.62），保留只为和上游行为一致
             if self.appear_then_click(self.I_REWARD, interval=2):
                 logger.info('FrogBoss: 结算页 -> 领取奖励')
                 continue
