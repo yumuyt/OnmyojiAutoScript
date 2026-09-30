@@ -96,7 +96,8 @@ class ScriptTask(RightActivity, FrogBossAssets, GeneralBattleAssets):
 
     def goto_next_round(self, timeout: int = 60) -> bool:
         """
-        从结算页回到下注界面：先点宝箱开奖励，再点「下一局」。
+        从结算页回到下注界面。顺序必须和上游一致：先开宝箱 / 领奖，最后才点「下一局」——
+        反过来写会在「宝箱还没开、下一局已经能点」的时候直接翻页，把奖励跳过去。
         新版结算页是「回放 / 下一局」两个按钮，这里只认右边的 » ，不会误点回放。
         """
         timer = Timer(timeout)
@@ -108,11 +109,11 @@ class ScriptTask(RightActivity, FrogBossAssets, GeneralBattleAssets):
             if timer.reached():
                 logger.warning(f'FrogBoss: {timeout} 秒内没有回到下注界面')
                 return False
-            if self.appear_then_click(self.I_NEXT_COMPETITION, interval=3):
-                continue
             if self.appear_then_click(self.I_BET_SUCCESS_BOX, interval=1):
                 continue
             if self.appear_then_click(self.I_REWARD, interval=2):
+                continue
+            if self.appear_then_click(self.I_NEXT_COMPETITION, interval=4):
                 continue
 
     def next_run(self):
