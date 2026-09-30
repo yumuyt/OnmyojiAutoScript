@@ -18,9 +18,63 @@ from tasks.Component.SwitchSoul.switch_soul import SwitchSoul
 from tasks.DemonRetreat.assets import DemonRetreatAssets
 from tasks.AbyssShadows.assets import AbyssShadowsAssets
 from tasks.DemonRetreat.config import DemonRetreat
-from tasks.Component.activity_window import RETRY_WINDOW, in_retry_window
+from tasks.Component.config_base import Time
+from tasks.Component.activity_window import RETRY_WINDOW, activity_target, in_retry_window
 
 class ScriptTask(GameUi, GeneralBattle, SwitchSoul, DemonRetreatAssets, AbyssShadowsAssets):
+
+    def retreat_run_time(self) -> Time:
+        """内置的周六退治开打时刻(游戏里周六 10:00~23:00 由会长/副会长开)
+
+        NOTE 脚本进程还没重启时, 老配置模型里可能没有这个字段(或还是旧字段名 custom_run_time),
+             此时退回默认 10:00 而不是让任务报错
+        """
+        cfg: DemonRetreat = self.config.demon_retreat
+        run_time = getattr(cfg.demon_retreat_time, 'custom_run_time_saturday', None)
+        if run_time is None:
+            run_time = getattr(cfg.demon_retreat_time, 'custom_run_time', None)
+        if run_time is None:
+            logger.warning("custom_run_time_saturday not found in config model, use default 10:00 "
+                           "(restart the script process to enable this option)")
+            run_time = Time(hour=10, minute=0, second=0)
+        return run_time
+
+    @staticmethod
+    def days_until_saturday(today: int = None) -> int:
+        """距离下一个周六的天数(周一=0; 周六当天返回 0)"""
+        today = datetime.now().weekday() if today is None else today
+        return (5 - today) % 7
+
+    def plan_next_saturday(self, run_time: Time) -> None:
+        """排到下一个周六的内置退治时刻
+
+        内置时间的关键: 不管任务是哪天被拉起来的(比如暂停很久后重启),
+        排期都会回到"下一个周六的配置时刻", 不跟着这次运行的时间漂移
+        """
+        # 周六当天跑完 -> 排到 7 天后的同一时刻
+        delta = self.days_until_saturday() or 7
+        logger.info(f"Plan next run: {delta} day(s) later at {run_time}")
+        self.custom_next_run(task='DemonRetreat', custom_time=run_time,
+                             time_delta=delta, server=False)
+
+    def plan_after_failure(self, run_time: Time, finish: bool) -> None:
+        """退治没进去/打失败时的排期
+
+        - 开打时刻前 30 分钟 ~ 后 1 小时(activity_window 的 LEAD_WINDOW/RETRY_WINDOW): 按失败间隔重试(仍在当天)
+        - 比这更早(被提前拉起): 直接排到今天那一刻, 不空跑
+        - 超出窗口: 放弃当天, 排到下周六
+        """
+        now = datetime.now()
+        target = activity_target(now, run_time)
+        if in_retry_window(now, run_time):
+            # 活动时刻前 30 分钟 ~ 后 1 小时: 按失败间隔重试(仍在当天)
+            self.set_next_run(task='DemonRetreat', finish=finish, server=False, success=False)
+        elif now < target:
+            logger.info(f"Demon retreat starts at {run_time}, wait until {target}")
+            self.set_next_run(task='DemonRetreat', target=target, server=False)
+        else:
+            logger.warning(f"Retry window({RETRY_WINDOW}) exceeded, the next time is next Saturday")
+            self.plan_next_saturday(run_time)
 
     def run(self):
         """
@@ -28,25 +82,18 @@ class ScriptTask(GameUi, GeneralBattle, SwitchSoul, DemonRetreatAssets, AbyssSha
         """
 
         cfg: DemonRetreat = self.config.demon_retreat
+        # 内置的退治开打时刻, 排程全部以它为基准(server=False)
+        run_time = self.retreat_run_time()
 
         # 判断是否为周六，只有周六才可以进行退治
-        current_date = datetime.now()
-        current_day_of_week = current_date.weekday()  # Monday is 0 and Sunday is 6
+        current_day_of_week = datetime.now().weekday()  # Monday is 0 and Sunday is 6
 
         if current_day_of_week == 5:
             # 是周六，继续运行写好的任务代码
             pass
         else:
-            # 不是周六
-            if current_day_of_week < 5:
-                # 周一至周五
-                days_until_saturday = 5 - current_day_of_week
-            else:
-                # 周日
-                days_until_saturday = 5 - current_day_of_week + 7
-
-                # 设置下次运行时间
-            self.custom_next_run(task='DemonRetreat', custom_time=cfg.demon_retreat_time.custom_run_time, time_delta=days_until_saturday)
+            # 不是周六: 直接排到下周六的内置时刻
+            self.plan_next_saturday(run_time)
             raise TaskEnd
 
         if cfg.switch_soul_config.enable:
@@ -64,12 +111,7 @@ class ScriptTask(GameUi, GeneralBattle, SwitchSoul, DemonRetreatAssets, AbyssSha
             if self.appear_then_click(self.I_DEMON_BACK_CHECK, interval=1):
                 pass
             self.goto_main()
-            if in_retry_window(datetime.now(), cfg.demon_retreat_time.custom_run_time):
-                # 活动开始后 1 小时内: 按失败间隔重试
-                self.set_next_run(task='DemonRetreat', finish=False, server=True, success=False)
-            else:
-                logger.warning(f"Retry window({RETRY_WINDOW}) exceeded, the next time is next Saturday")
-                self.custom_next_run(task='DemonRetreat', custom_time=cfg.demon_retreat_time.custom_run_time, time_delta=7)
+            self.plan_after_failure(run_time, finish=False)
             raise TaskEnd
 
         # 首领退治战斗
@@ -98,13 +140,9 @@ class ScriptTask(GameUi, GeneralBattle, SwitchSoul, DemonRetreatAssets, AbyssSha
         # 设置下次运行时间
         if success:
             logger.info(f"The next time the demon retreat is next Saturday")
-            self.custom_next_run(task='DemonRetreat', custom_time=cfg.demon_retreat_time.custom_run_time, time_delta=7)
-        elif in_retry_window(datetime.now(), cfg.demon_retreat_time.custom_run_time):
-            # 活动开始后 1 小时内: 按失败间隔重试
-            self.set_next_run(task="DemonRetreat", finish=True, server=True, success=False)
+            self.plan_next_saturday(run_time)
         else:
-            logger.warning(f"Retry window({RETRY_WINDOW}) exceeded, the next time is next Saturday")
-            self.custom_next_run(task='DemonRetreat', custom_time=cfg.demon_retreat_time.custom_run_time, time_delta=7)
+            self.plan_after_failure(run_time, finish=True)
 
         raise TaskEnd
 
@@ -114,7 +152,6 @@ class ScriptTask(GameUi, GeneralBattle, SwitchSoul, DemonRetreatAssets, AbyssSha
         """
         进入首领退治
         """
-        cfg: DemonRetreat = self.config.demon_retreat
         self.ui_get_current_page()
         logger.info("Entering demon_retreat")
         self.ui_goto(page_guild)
@@ -148,8 +185,7 @@ class ScriptTask(GameUi, GeneralBattle, SwitchSoul, DemonRetreatAssets, AbyssSha
                 if self.appear_then_click(self.I_DEMON_BACK_CHECK, interval=1):
                     pass
                 logger.info(f"The next time the demon retreat is next Saturday")
-                self.custom_next_run(task='DemonRetreat', custom_time=cfg.demon_retreat_time.custom_run_time,
-                                     time_delta=7)
+                self.plan_next_saturday(self.retreat_run_time())
                 raise TaskEnd
 
             if self.appear(self.I_RANK_LSIT):

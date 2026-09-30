@@ -663,18 +663,23 @@ class BaseTask(GlobalGameAssets, CostumeBase):
             start_time = self.start_time
         self.config.task_delay(task, start_time=start_time, success=success, server=server, target=target)
 
-    def custom_next_run(self, task: str, custom_time: Time = None, time_delta: float = 1) -> None:
+    def custom_next_run(self, task: str, custom_time: Time = None, time_delta: float = 1,
+                        server: bool = True) -> None:
         """
         设置下次自定义运行时间
         :param task: 任务名称，大驼峰的
         :param custom_time: 可以自定义的下次运行时间
         :param time_delta: 下次运行日期为几天后，默认为第二天
+        :param server: 是否让 scheduler.server_update 参与计算
+                       NOTE 内置了活动时刻的任务(如寮宴会)要传 False: 否则当 server_update 不是 09:00 时,
+                            self.set_next_run 会把时间改写成"明天 server_update 时刻"(见 Config.task_delay),
+                            这里传进来的 custom_time 就白算了
         :return:
         """
         target_time = (datetime.now() + timedelta(days=time_delta)).replace(hour=custom_time.hour,
                                                                             minute=custom_time.minute,
                                                                             second=custom_time.second)
-        self.set_next_run(task, target=target_time)
+        self.set_next_run(task, target=target_time, server=server)
 
     #  ---------------------------------------------------------------------------------------------------------------
     #

@@ -16,7 +16,7 @@ from tasks.Component.GeneralBattle.config_general_battle import GeneralBattleCon
 from tasks.Component.SwitchSoul.switch_soul import SwitchSoul
 from tasks.Component.GeneralBattle.general_battle import GeneralBattle
 from tasks.Component.config_base import ConfigBase, Time
-from tasks.Component.activity_window import RETRY_WINDOW, in_retry_window
+from tasks.Component.activity_window import RETRY_WINDOW, activity_target, in_retry_window
 from tasks.GameUi.game_ui import GameUi
 from tasks.GameUi.page import page_main, page_kekkai_toppa, page_shikigami_records, page_guild
 from tasks.RealmRaid.assets import RealmRaidAssets
@@ -99,20 +99,44 @@ class ScriptTask(GeneralBattle, GameUi, SwitchSoul, AbyssShadowsAssets):
         return cfg.abyss_shadows_time.custom_run_time_sunday
 
     def plan_next_abyss_day(self, today: int):
-        """排到下一个暗域日: 周五 -> 周六 -> 周日 -> 周五"""
+        """排到下一个暗域日: 周五 -> 周六 -> 周日 -> 周五
+
+        NOTE 显式传 server=False: 否则 scheduler.server_update 不是 09:00 时,
+             内置的暗域时刻会被 Config.task_delay 改写成"明天 server_update 时刻"
+        """
         cfg: AbyssShadows = self.config.abyss_shadows
         if today == 4:
             # 周五推迟到周六
             logger.info(f"The next abyss shadows day is Saturday")
-            self.custom_next_run(task='AbyssShadows', custom_time=cfg.abyss_shadows_time.custom_run_time_saturday, time_delta=1)
+            self.custom_next_run(task='AbyssShadows', custom_time=cfg.abyss_shadows_time.custom_run_time_saturday, time_delta=1, server=False)
         elif today == 5:
             # 周六推迟到周日
             logger.info(f"The next abyss shadows day is Sunday")
-            self.custom_next_run(task='AbyssShadows', custom_time=cfg.abyss_shadows_time.custom_run_time_sunday, time_delta=1)
+            self.custom_next_run(task='AbyssShadows', custom_time=cfg.abyss_shadows_time.custom_run_time_sunday, time_delta=1, server=False)
         elif today == 6:
             # 周日推迟到下周五
             logger.info(f"The next abyss shadows day is Friday")
-            self.custom_next_run(task='AbyssShadows', custom_time=cfg.abyss_shadows_time.custom_run_time_friday, time_delta=5)
+            self.custom_next_run(task='AbyssShadows', custom_time=cfg.abyss_shadows_time.custom_run_time_friday, time_delta=5, server=False)
+
+    def plan_after_failure(self, today: int, finish: bool) -> None:
+        """暗域没进去/打失败时的排期
+
+        - 活动时刻前 30 分钟 ~ 后 1 小时(activity_window 的 LEAD_WINDOW/RETRY_WINDOW): 按失败间隔重试(仍在当天)
+        - 比这更早(被提前拉起): 直接排到今天那一刻, 不空跑
+        - 超出窗口: 放弃当天, 排到下一个暗域日
+        """
+        now = datetime.now()
+        run_time = self.today_abyss_run_time(today)
+        target = activity_target(now, run_time)
+        if in_retry_window(now, run_time):
+            # 活动时刻前 30 分钟 ~ 后 1 小时: 按失败间隔重试(仍在当天)
+            self.set_next_run(task='AbyssShadows', finish=finish, server=False, success=False)
+        elif now < target:
+            logger.info(f"Abyss shadows starts at {run_time}, wait until {target}")
+            self.set_next_run(task='AbyssShadows', target=target, server=False)
+        else:
+            logger.warning(f"Retry window({RETRY_WINDOW}) exceeded, give up today")
+            self.plan_next_abyss_day(today)
     
     def run(self):
         """ 狭间暗域主函数
@@ -133,7 +157,7 @@ class ScriptTask(GeneralBattle, GameUi, SwitchSoul, AbyssShadowsAssets):
         if today not in [4, 5, 6]:
             logger.info(f"Today is not abyss shadows day, exit")
             # 设置下次运行时间为本周五
-            self.custom_next_run(task='AbyssShadows', custom_time=cfg.abyss_shadows_time.custom_run_time_friday, time_delta=4-today)
+            self.custom_next_run(task='AbyssShadows', custom_time=cfg.abyss_shadows_time.custom_run_time_friday, time_delta=4-today, server=False)
             raise TaskEnd
         success = True
         # 进入狭间
@@ -142,12 +166,7 @@ class ScriptTask(GeneralBattle, GameUi, SwitchSoul, AbyssShadowsAssets):
         if not self.select_boss(AreaType.DRAGON):
             logger.warning("Failed to enter abyss shadows")
             self.goto_main()
-            if in_retry_window(datetime.now(), self.today_abyss_run_time(today)):
-                # 活动开始后 1 小时内: 按失败间隔重试
-                self.set_next_run(task='AbyssShadows', finish=False, server=True, success=False)
-            else:
-                logger.warning(f"Retry window({RETRY_WINDOW}) exceeded, give up today")
-                self.plan_next_abyss_day(today)
+            self.plan_after_failure(today, finish=False)
             raise TaskEnd
         
         # 等待可进攻时间  
@@ -233,12 +252,8 @@ class ScriptTask(GeneralBattle, GameUi, SwitchSoul, AbyssShadowsAssets):
         if success:
             logger.info("Abyss shadows finished, plan the next abyss day")
             self.plan_next_abyss_day(today)
-        elif in_retry_window(datetime.now(), self.today_abyss_run_time(today)):
-            # 活动开始后 1 小时内: 按失败间隔重试
-            self.set_next_run(task='AbyssShadows', finish=True, server=True, success=False)
         else:
-            logger.warning(f"Retry window({RETRY_WINDOW}) exceeded, give up today")
-            self.plan_next_abyss_day(today)
+            self.plan_after_failure(today, finish=True)
         raise TaskEnd
 
 
