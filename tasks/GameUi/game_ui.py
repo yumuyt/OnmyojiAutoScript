@@ -226,7 +226,9 @@ class GameUi(BaseTask, GameUiAssets):
                 # 登录页没有任何出边（登录流程由 Restart 任务负责）。这里必须抛
                 # GamePageUnknownError，让 script.py 走 task_call('Restart') 去登录；
                 # 否则 ui_goto 只会在这句里空转到 60s 超时，任务干等在登录界面不动作。
-                if self.ui_current == page_login:
+                # 用 is 而不是 ==：ui_current 可能刚被置成 None（见下面 `self.ui_current = None`），
+                # page_login 是模块级单例，身份比较既准确又不会踩到 None。
+                if self.ui_current is page_login:
                     logger.warning('Current page is page_login, it should be handled by task `Restart`')
                     raise GamePageUnknownError('Current page is page_login')
                 self.ui_get_current_page(skip_first_screenshot)

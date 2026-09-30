@@ -38,6 +38,11 @@ class Page:
         PageRegistry.register(self)
 
     def __eq__(self, other):
+        # 只和 Page 比较：ui_current 在 ui_goto 失败时会被置为 None，
+        # 早先直接取 other.name 会让 `None == page_login` 抛
+        # AttributeError: 'NoneType' object has no attribute 'name'（2026-10-01 00:01 两次崩溃）。
+        if not isinstance(other, Page):
+            return NotImplemented
         return self.name == other.name
 
     def __hash__(self):
