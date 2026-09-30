@@ -20,6 +20,11 @@ from tasks.Component.config_base import TimeDelta
 from tasks.FrogBoss.assets import FrogBossAssets
 from tasks.FrogBoss.config import Strategy
 
+# 新版（2026-09-30）对弈竞猜面板在 1280x720 下的实测坐标，
+# 仅在结算页素材没匹配上时兜底点击（顺序仍是先宝箱、后下一局，不会跳过奖励）
+C_SETTLE_BOX = (754, 420)  # 结算页宝箱中心
+C_SETTLE_NEXT = (799, 505)  # 结算页「下一局」的 » 图标中心
+
 
 class ScriptTask(RightActivity, FrogBossAssets, GeneralBattleAssets):
     def run(self):
@@ -41,16 +46,12 @@ class ScriptTask(RightActivity, FrogBossAssets, GeneralBattleAssets):
             if self.appear(self.I_FROG_BOSS_REST):
                 logger.info('Frog Boss Rest')
                 break
-            # 竞猜成功
-            if self.appear(self.I_BET_SUCCESS):
-                logger.info('You bet win')
-                idle_timer.reset()
-                self.detect()
-                self.goto_next_round()
-                continue
-            # 竞猜失败
-            if self.appear(self.I_BET_FAILURE):
-                logger.info('You bet lose')
+            # 竞猜成功 / 竞猜失败：新版两个页面的后续动作完全一样，都是「开宝箱 -> 下一局」
+            win = self.appear(self.I_BET_SUCCESS)
+            lose = self.appear(self.I_BET_FAILURE)
+            if win or lose or self.settle_page_appear():
+                logger.info('FrogBoss: 结算页（%s）' % (
+                    '竞猜成功' if win else '竞猜失败' if lose else '标题没认出来，按印章/宝箱/按钮判定'))
                 idle_timer.reset()
                 self.detect()
                 self.goto_next_round()
@@ -69,11 +70,42 @@ class ScriptTask(RightActivity, FrogBossAssets, GeneralBattleAssets):
             # 停在未知界面（面板没展开 / 活动休息但素材没认出来）时不要一直空转
             if idle_timer.reached():
                 logger.warning('FrogBoss: 30 秒没有命中任何已知界面，放弃本次运行')
+                self.save_debug_shot('未知界面')
                 break
 
         logger.info('FrogBoss end')
         self.next_run()
         raise TaskEnd('FrogBoss')
+
+    def settle_page_appear(self) -> bool:
+        """
+        结算页兜底判定。标题素材万一在实机上认不出来（文字有动画 / 又改版），
+        只要鼓上的胜败印章、宝箱、下一局按钮里任何一个在，就认定这里是结算页。
+        下注界面/压注页这些素材的分数都在 0.6 以下，不会误判。
+        """
+        return (self.appear(self.I_SUCCESS_LEFT) or self.appear(self.I_FAILURE_RIGHT)
+                or self.appear(self.I_BET_SUCCESS_BOX) or self.appear(self.I_NEXT_COMPETITION))
+
+    def match_score(self, image: RuleImage) -> float:
+        """
+        只算匹配分数（不改 roi_front），用来诊断素材在实机上到底差多少
+        """
+        import cv2
+        target = image.image
+        source = image.corp(self.device.image)
+        if target is None or target.shape[0] > source.shape[0] or target.shape[1] > source.shape[1]:
+            return -1.0
+        return float(cv2.matchTemplate(source, target, cv2.TM_CCOEFF_NORMED).max())
+
+    def save_debug_shot(self, reason: str) -> None:
+        """
+        把实机当前这一帧存到 ./log/screenshots/，方便回头核对素材到底长什么样
+        """
+        try:
+            if self.device.save_screenshot(genre='frogboss', interval=5):
+                logger.info(f'FrogBoss: 已保存现场截图（{reason}）到 log/screenshots/')
+        except Exception as e:
+            logger.warning(f'FrogBoss: 保存现场截图失败：{e}')
 
     def enter_panel(self) -> bool:
         """
@@ -101,26 +133,54 @@ class ScriptTask(RightActivity, FrogBossAssets, GeneralBattleAssets):
 
         新版结算页（2026-09 改版）实测：没有独立的领取入口，翻盘奖励是开箱即得，
         开箱后新增的可交互物只有「回放 / 下一局」两个按钮。这里只认右边的 » ，不会误点回放。
+
+        素材万一在实机上认不出来（分数不够），这里也不会干等着：先存现场帧 + 打分数，
+        再按改版实测坐标点一次宝箱、再点一次「下一局」——顺序仍然是先宝箱后下一局，
+        所以不会把奖励跳过去。
         """
         timer = Timer(timeout)
         timer.start()
+        stuck_timer = Timer(6)
+        stuck_timer.start()
+        blind_box, blind_next = False, False
         while 1:
             self.screenshot()
             if self.appear(self.I_BET_LEFT) and self.appear(self.I_BET_RIGHT):
                 return True
             if timer.reached():
                 logger.warning(f'FrogBoss: {timeout} 秒内没有回到下注界面')
+                self.save_debug_shot('结算页没翻过去')
                 return False
             if self.appear_then_click(self.I_BET_SUCCESS_BOX, interval=1):
                 logger.info('FrogBoss: 结算页 -> 开宝箱')
+                stuck_timer.reset()
                 continue
             # 新版界面上这一步点不到（旧素材在新版全图多尺度搜索最高 0.62），保留只为和上游行为一致
             if self.appear_then_click(self.I_REWARD, interval=2):
                 logger.info('FrogBoss: 结算页 -> 领取奖励')
+                stuck_timer.reset()
                 continue
             if self.appear_then_click(self.I_NEXT_COMPETITION, interval=4):
                 logger.info('FrogBoss: 结算页 -> 下一局')
+                stuck_timer.reset()
                 continue
+            # 兜底：素材没匹配上，打分数 + 存现场，再按实测坐标点一次
+            if stuck_timer.reached():
+                stuck_timer.reset()
+                if not blind_box:
+                    blind_box = True
+                    logger.warning('FrogBoss: 结算页素材没匹配上，分数 宝箱 %.3f / 下一局 %.3f / 领奖 %.3f'
+                                   % (self.match_score(self.I_BET_SUCCESS_BOX),
+                                      self.match_score(self.I_NEXT_COMPETITION),
+                                      self.match_score(self.I_REWARD)))
+                    self.save_debug_shot('宝箱认不出')
+                    logger.warning(f'FrogBoss: 按实测坐标点一次宝箱 {C_SETTLE_BOX}')
+                    self.device.click(*C_SETTLE_BOX)
+                elif not blind_next:
+                    blind_next = True
+                    self.save_debug_shot('下一局认不出')
+                    logger.warning(f'FrogBoss: 按实测坐标点一次下一局 {C_SETTLE_NEXT}')
+                    self.device.click(*C_SETTLE_NEXT)
 
     def next_run(self):
         time = self.config.model.frog_boss.frog_boss_config.before_end_frog
