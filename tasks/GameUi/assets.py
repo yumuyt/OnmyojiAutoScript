@@ -198,7 +198,7 @@ class GameUiAssets:
 
 	# Image Rule Assets
 	# description 
-	I_CHECK_LOGIN_FORM = RuleImage(roi_front=(178,572,53,60), roi_back=(1,500,400,150), threshold=0.8, method="Template matching", file="./tasks/GameUi/page/page_check_login_form.png")
+	I_CHECK_LOGIN_FORM = RuleImage(roi_front=(166,565,51,56), roi_back=(1,490,420,190), threshold=0.8, method="Template matching", file="./tasks/GameUi/page/page_check_login_form.png")
 
 
 	# Image Rule Assets

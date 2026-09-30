@@ -2,8 +2,8 @@
   {
     "itemName": "check_login_form",
     "imageName": "check_login_form.png",
-    "roiFront": "178,572,53,60",
-    "roiBack": "1,547,241,105",
+    "roiFront": "165,564,51,56",
+    "roiBack": "1,520,241,160",
     "method": "Template matching",
     "threshold": 0.8,
     "description": "用于判断是否在登录界面的"

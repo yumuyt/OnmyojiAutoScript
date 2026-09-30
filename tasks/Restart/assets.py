@@ -107,7 +107,7 @@ class RestartAssets:
 	# description 
 	I_LOGIN_YELLOW_CLOSE = RuleImage(roi_front=(29,17,46,44), roi_back=(0,0,94,86), threshold=0.8, method="Template matching", file="./tasks/Restart/login/login_login_yellow_close.png")
 	# 用于判断是否出现登录选区的 
-	I_LOGIN_8 = RuleImage(roi_front=(178,572,53,60), roi_back=(1,547,241,105), threshold=0.8, method="Template matching", file="./tasks/Restart/login/login_login_8.png")
+	I_LOGIN_8 = RuleImage(roi_front=(165,564,53,60), roi_back=(1,520,241,160), threshold=0.8, method="Template matching", file="./tasks/Restart/login/login_login_8.png")
 	# 登录时候不观看CG视频 
 	I_WATCH_VIDEO_CANCEL = RuleImage(roi_front=(466,396,130,61), roi_back=(466,396,130,61), threshold=0.8, method="Template matching", file="./tasks/Restart/login/login_watch_video_cancel.png")
 	# 指定角色进入游戏,默认第一个 
@@ -138,7 +138,7 @@ class RestartAssets:
 	# 正在连接服务器 
 	O_LOGIN_NETWORK = RuleOcr(roi=(534,649,189,39), area=(210,492,100,100), mode="Single", method="Default", keyword="正在连接服务器", name="login_network")
 	# Ocr-description 
-	O_LOGIN_ENTER_GAME = RuleOcr(roi=(589,544,101,107), area=(558,574,154,49), mode="Single", method="Default", keyword="进入", name="login_enter_game")
+	O_LOGIN_ENTER_GAME = RuleOcr(roi=(552,562,170,80), area=(558,574,154,49), mode="Single", method="Default", keyword="进入", name="login_enter_game")
 	# 兼容原先的进入游戏 
 	O_LOGIN_ENTER_GAME_ORIGIN = RuleOcr(roi=(550,567,176,56), area=(558,574,154,49), mode="Single", method="Default", keyword="进入游戏", name="login_enter_game_origin")
 	# 点击屏幕跳过 
