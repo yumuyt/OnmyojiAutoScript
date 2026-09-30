@@ -52,14 +52,22 @@ class ScriptTask(GameUi, CollectiveMissionsAssets):
         self.ui_click(self.I_CM_SHRINE, self.I_CM_CM)
         self.ui_click(self.I_CM_CM, self.I_CM_RECORDS)
         logger.info('Start to detect missions')
-        # 判断今天是否已经完成了， 还是多少次数的任务
+
+        # 1. 先领奖励。
+        #    必须在"判上限"之前：三个任务共享每日 30 次上限，中间的任务(我爱我寮)
+        #    会在日常里自动完成，所以即使「今日已完成次数」已经 30/30，
+        #    它的奖励仍可能挂在卡片上没领。顺序反了就永远领不到。
+        self.claim_rewards()
+
+        # 2. 再判断今天是否已经完成到上限
         self.screenshot()
         current, remain, total = self.O_CM_NUMBER.ocr(self.device.image)
-        if current == total == 30:
-            logger.warning('Today\'s missions have been completed')
+        if total and current >= total:
+            logger.warning(f'Today\'s missions have been completed ({current}/{total})')
             self.set_next_run(task='CollectiveMissions', success=False, finish=True)
             raise TaskEnd('CollectiveMissions')
-        #切换为目标任务
+
+        # 3. 还有剩余次数 → 切换为目标任务并完成
         mission_name = self.config.collective_missions.missions_config.missions_select
         self.select_mission(mission_name)
         # 判断最优的任务是哪一个
@@ -172,8 +180,22 @@ class ScriptTask(GameUi, CollectiveMissionsAssets):
             self.set_next_run(task='CollectiveMissions', success=True, finish=True, target=self.start_time + timedelta(hours=2))
             return True
         # 领取奖励
-        logger.info('Start to collect bondling rewards')
-        check_timer = Timer(3)
+        self.claim_rewards()
+
+    def claim_rewards(self, timeout: float = 3) -> None:
+        """
+        领掉卡片上所有亮着的「领取奖励」。
+
+        游戏规则：左中右三个任务共享每日 30 次上限，其中只有**前 10 次**完成的任务
+        有双倍奖励（触发时会弹两次奖励窗）。中间的任务会在日常活动里自动完成，
+        所以即使「今日已完成次数」已到 30/30，它的奖励仍可能挂在卡片上没领 ——
+        这一步因此必须放在"判上限"之前。
+
+        I_CM_REWARDS 的 roi_back=(200,458,914,88) 横跨三张卡底部，
+        match() 会自动定位到有按钮的那张卡，不需要为每张卡单独写一条。
+        """
+        logger.info('Start to collect rewards')
+        check_timer = Timer(timeout)
         check_timer.start()
         while 1:
             self.screenshot()
@@ -185,7 +207,7 @@ class ScriptTask(GameUi, CollectiveMissionsAssets):
                 continue
             if check_timer.reached():
                 break
-        logger.info('Finish to collect bondling rewards')
+        logger.info('Finish to collect rewards')
 
     def _donate(self, index: int):
         """
@@ -263,16 +285,38 @@ class ScriptTask(GameUi, CollectiveMissionsAssets):
                 raise RequestHumanTakeover
 
         logger.info('Swipe to the most matter')
-        # 还有一点很重要的，捐赠会有双倍的，需要领两次
+        # 领奖。
+        #
+        # 游戏规则：左中右三个任务共享每日 30 次上限，其中**只有前 10 次**完成的任务
+        # 有双倍奖励（界面右下角「双倍奖励 X/10」），触发时会产生**两次**奖励弹窗。
+        #
+        # 但中间的任务(我爱我寮)会在日常活动里自动完成 10~30 次，通常它先把前 10 次
+        # 的双倍额度吃掉 —— 之后再做左边的任务时已经没有双倍了，**只会弹一次**。
+        #
+        # 所以这里不能死等第 2 次弹窗：原实现以「领够 2 次」为唯一出口，
+        # 遇到没双倍的情况就会一直空转，直到设备 stuck 检测（60s）抛 GameStuckError。
         reward_number = 0
+        total_timer = Timer(30).start()    # 整个领奖阶段的兜底超时
+        second_timer = Timer(5).start()    # 领到第 1 次后，再给第 2 次留的等待时间
         while 1:
             self.screenshot()
 
-            if reward_number >= 2:
-                break
             if self.ui_reward_appear_click(False):
                 reward_number += 1
+                second_timer.reset()
+                total_timer.reset()
                 continue
+
+            if reward_number >= 2:
+                logger.info('双倍奖励生效，已领 2 次')
+                break
+            if reward_number >= 1 and second_timer.reached():
+                logger.info('本次只有 1 次奖励弹窗（双倍额度已用完），继续')
+                break
+            if total_timer.reached():
+                logger.warning(f'领奖超时，本次已领 {reward_number} 次')
+                break
+
             if self.appear_then_click(self.I_CM_PRESENT, interval=1):
                 continue
         self.ui_reward_appear_click(True)
@@ -309,6 +353,12 @@ class ScriptTask(GameUi, CollectiveMissionsAssets):
             if self.appear_then_click(self.I_CM_SWITCH, interval=2):
                 logger.info(f"尝试切换任务")
                 click_cnt += 1
+                # 切换任务是"合法连点"：每次点击屏幕内容都在变（任务名在轮换），
+                # 但框架的连点保护是按按钮计数的（device.py: 同一按钮累计 10 次就抛
+                # GameTooManyClickError 并强制重启），属于误伤。
+                # 清掉记录，让上面 click_cnt > 20 成为真正的安全网。
+                # 同类先例：BondlingFairyland/battle.py "需要10次结契因此清空点击记录"
+                self.device.click_record_clear()
 
 
 
