@@ -31,6 +31,9 @@ class ScriptTask(RightActivity, FrogBossAssets, GeneralBattleAssets):
         self.enter(self.I_FROG_BOSS_ENTER)
         # 新版（2026-09）：对弈竞猜挂在「活动总览」里，挂牌列点进来可能只到总览页
         self.enter_panel()
+        # 结算页兜底点击每次任务运行只做一次（见 goto_next_round）
+        self.blind_settle_box = False
+        self.blind_settle_next = False
 
         # 进入主界面
         idle_timer = Timer(30)
@@ -107,24 +110,42 @@ class ScriptTask(RightActivity, FrogBossAssets, GeneralBattleAssets):
         except Exception as e:
             logger.warning(f'FrogBoss: 保存现场截图失败：{e}')
 
+    def panel_appear(self) -> bool:
+        """
+        对弈竞猜面板上任何一种已知状态：
+        下注界面（两个鼓）/ 已竞猜 / 休息中 / 结算页 / 压注页。
+        新版点进面板后不一定是下注界面——很可能正停在上一局的结算页，
+        所以这些状态都要认，不然会以为"没进面板"而反复点入口。
+        """
+        return (self.appear(self.I_BET_LEFT) or self.appear(self.I_BET_RIGHT)
+                or self.appear(self.I_BETTED) or self.appear(self.I_FROG_BOSS_REST)
+                or self.appear(self.I_BET_SUCCESS) or self.appear(self.I_BET_FAILURE)
+                or self.settle_page_appear()
+                or self.appear(self.I_BET_SURE) or self.appear(self.I_GOLD_30))
+
     def enter_panel(self) -> bool:
         """
-        新版「活动总览」：庭院挂牌列点进来后，如果面板还没展开，
-        需要在左栏「精彩活动」里再点一次「对弈竞猜」。
-        已经是下注界面 / 已竞猜 / 休息中就什么都不做。
+        新版「活动总览」：庭院挂牌列点进来后，面板不一定已经选到对弈竞猜，
+        需要在左栏「精彩活动」里补点一次。
+
+        最多点 2 次：OAS 对同一个按钮点满 10 次会抛 GameTooManyClickError 并重启游戏
+        （2026-09-30 日志里就是这里点了 10 次把游戏点重启的），这里必须收敛。
         """
-        timer = Timer(20)
+        timer = Timer(15)
         timer.start()
+        clicked = 0
         while 1:
             self.screenshot()
-            if self.appear(self.I_BET_LEFT) or self.appear(self.I_BET_RIGHT) \
-                    or self.appear(self.I_BETTED) or self.appear(self.I_FROG_BOSS_REST):
+            if self.panel_appear():
                 return True
-            if timer.reached():
-                logger.warning('FrogBoss: 20 秒内没有进到对弈竞猜面板')
-                return False
-            if self.appear_then_click(self.I_FROG_BOSS_ENTRY_LIST, interval=2):
+            if clicked < 2 and self.appear_then_click(self.I_FROG_BOSS_ENTRY_LIST, interval=3):
+                clicked += 1
+                logger.info(f'FrogBoss: 点左栏「对弈竞猜」入口（第 {clicked} 次）')
                 continue
+            if timer.reached():
+                logger.warning('FrogBoss: 15 秒内没有进到对弈竞猜面板')
+                self.save_debug_shot('没进面板')
+                return False
 
     def goto_next_round(self, timeout: int = 60) -> bool:
         """
@@ -142,7 +163,9 @@ class ScriptTask(RightActivity, FrogBossAssets, GeneralBattleAssets):
         timer.start()
         stuck_timer = Timer(6)
         stuck_timer.start()
-        blind_box, blind_next = False, False
+        # 同一个按钮点太多次会触发 OAS 的连点保护（同一按钮 10 次 = GameTooManyClickError
+        # -> 重启游戏），所以每个按钮都设上限
+        clicks = {'box': 0, 'reward': 0, 'next': 0}
         while 1:
             self.screenshot()
             if self.appear(self.I_BET_LEFT) and self.appear(self.I_BET_RIGHT):
@@ -151,24 +174,27 @@ class ScriptTask(RightActivity, FrogBossAssets, GeneralBattleAssets):
                 logger.warning(f'FrogBoss: {timeout} 秒内没有回到下注界面')
                 self.save_debug_shot('结算页没翻过去')
                 return False
-            if self.appear_then_click(self.I_BET_SUCCESS_BOX, interval=1):
-                logger.info('FrogBoss: 结算页 -> 开宝箱')
+            if clicks['box'] < 3 and self.appear_then_click(self.I_BET_SUCCESS_BOX, interval=1):
+                clicks['box'] += 1
+                logger.info('FrogBoss: 结算页 -> 开宝箱（第 %d 次）' % clicks['box'])
                 stuck_timer.reset()
                 continue
             # 新版界面上这一步点不到（旧素材在新版全图多尺度搜索最高 0.62），保留只为和上游行为一致
-            if self.appear_then_click(self.I_REWARD, interval=2):
-                logger.info('FrogBoss: 结算页 -> 领取奖励')
+            if clicks['reward'] < 3 and self.appear_then_click(self.I_REWARD, interval=2):
+                clicks['reward'] += 1
+                logger.info('FrogBoss: 结算页 -> 领取奖励（第 %d 次）' % clicks['reward'])
                 stuck_timer.reset()
                 continue
-            if self.appear_then_click(self.I_NEXT_COMPETITION, interval=4):
-                logger.info('FrogBoss: 结算页 -> 下一局')
+            if clicks['next'] < 5 and self.appear_then_click(self.I_NEXT_COMPETITION, interval=2):
+                clicks['next'] += 1
+                logger.info('FrogBoss: 结算页 -> 下一局（第 %d 次）' % clicks['next'])
                 stuck_timer.reset()
                 continue
-            # 兜底：素材没匹配上，打分数 + 存现场，再按实测坐标点一次
+            # 兜底：素材没匹配上，打分数 + 存现场，再按实测坐标点一次（每次任务运行只做一次）
             if stuck_timer.reached():
                 stuck_timer.reset()
-                if not blind_box:
-                    blind_box = True
+                if not self.blind_settle_box:
+                    self.blind_settle_box = True
                     logger.warning('FrogBoss: 结算页素材没匹配上，分数 宝箱 %.3f / 下一局 %.3f / 领奖 %.3f'
                                    % (self.match_score(self.I_BET_SUCCESS_BOX),
                                       self.match_score(self.I_NEXT_COMPETITION),
@@ -176,8 +202,8 @@ class ScriptTask(RightActivity, FrogBossAssets, GeneralBattleAssets):
                     self.save_debug_shot('宝箱认不出')
                     logger.warning(f'FrogBoss: 按实测坐标点一次宝箱 {C_SETTLE_BOX}')
                     self.device.click(*C_SETTLE_BOX)
-                elif not blind_next:
-                    blind_next = True
+                elif not self.blind_settle_next:
+                    self.blind_settle_next = True
                     self.save_debug_shot('下一局认不出')
                     logger.warning(f'FrogBoss: 按实测坐标点一次下一局 {C_SETTLE_NEXT}')
                     self.device.click(*C_SETTLE_NEXT)
@@ -232,17 +258,22 @@ class ScriptTask(RightActivity, FrogBossAssets, GeneralBattleAssets):
             case _:
                 raise ValueError(f'Unknown bet mode: {self.config.model.frog_boss.frog_boss_config.strategy_frog}')
         logger.info(f'You strategy is {self.config.model.frog_boss.frog_boss_config.strategy_frog} and bet on {click_image}')
-        # 点鼓进压注页（鼓消失即说明进去了），加超时，避免点不开时一直点
+        # 点鼓进压注页（鼓消失即说明进去了），加超时 + 次数上限：
+        # 同一个按钮点满 10 次会触发 OAS 的连点保护并重启游戏
         drum_timer = Timer(20)
         drum_timer.start()
+        drum_clicks = 0
         while 1:
             self.screenshot()
             if not self.appear(click_image):
                 break
-            if drum_timer.reached():
-                logger.warning('FrogBoss: 点鼓 20 秒没有进入压注页，放弃本轮')
+            if drum_timer.reached() or drum_clicks >= 4:
+                logger.warning('FrogBoss: 点鼓没有进入压注页，放弃本轮')
+                self.save_debug_shot('点鼓没进压注页')
                 return
-            self.appear_then_click(click_image, interval=2)
+            if self.appear_then_click(click_image, interval=2):
+                drum_clicks += 1
+                continue
         gold_30_timer = Timer(10)
         gold_30_timer.start()
         while 1:
@@ -261,26 +292,37 @@ class ScriptTask(RightActivity, FrogBossAssets, GeneralBattleAssets):
         """
         在压注页 / 确认弹窗上把这一注下完：选 30 万 → 点右侧大鼓 → 点「确定」，直到出现「已竞猜」。
         上一次运行被打断停在压注页时，run() 也会调这里把这一注补完。
+        每个按钮都设了次数上限，避免点满 10 次触发 OAS 的连点保护（会重启游戏）。
         """
         logger.info('Formal bet')
         bet_timer = Timer(timeout)
         bet_timer.start()
+        clicks = {'pouch': 0, 'drum': 0, 'confirm': 0}
         while 1:
             self.screenshot()
             if self.appear(self.I_BETTED):
                 return True
             if bet_timer.reached():
                 logger.warning(f'FrogBoss: 下注 {timeout} 秒没有结果，放弃本轮')
+                self.save_debug_shot('下注没结果')
                 return False
             # 确认弹窗（「花费30万金币竞猜红方获胜，是否确认」）优先点确定
-            if self.appear_then_click(self.I_UI_CONFIRM, interval=2):
+            if clicks['confirm'] < 4 and self.appear_then_click(self.I_UI_CONFIRM, interval=2):
+                clicks['confirm'] += 1
+                logger.info('FrogBoss: 压注页 -> 点确定（第 %d 次）' % clicks['confirm'])
                 continue
-            if self.appear_then_click(self.I_UI_CONFIRM_SAMLL, interval=2):
+            if clicks['confirm'] < 4 and self.appear_then_click(self.I_UI_CONFIRM_SAMLL, interval=2):
+                clicks['confirm'] += 1
+                logger.info('FrogBoss: 压注页 -> 点确定(小)（第 %d 次）' % clicks['confirm'])
                 continue
-            if self.appear_then_click(self.I_BET_SURE, interval=2) and flag_glod_30 == 1:
+            if clicks['drum'] < 4 and self.appear_then_click(self.I_BET_SURE, interval=2) and flag_glod_30 == 1:
+                clicks['drum'] += 1
+                logger.info('FrogBoss: 压注页 -> 点大鼓（第 %d 次）' % clicks['drum'])
                 continue
-            if self.appear_then_click(self.I_GOLD_30, interval=2):
+            if clicks['pouch'] < 4 and self.appear_then_click(self.I_GOLD_30, interval=2):
+                clicks['pouch'] += 1
                 flag_glod_30 = 1
+                logger.info('FrogBoss: 压注页 -> 选 30 万红包（第 %d 次）' % clicks['pouch'])
                 continue
 
     def detect(self) -> bool:
