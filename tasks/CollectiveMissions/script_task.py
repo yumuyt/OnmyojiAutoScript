@@ -420,12 +420,24 @@ class ScriptTask(GameUi, CollectiveMissionsAssets):
         self.ui_click(match_click[index], self.I_FEED_HEAP)
         logger.info('Submit to feed soul')
         click_list = random.sample([self.L_FEED_CLICK_1, self.L_FEED_CLICK_2, self.L_FEED_CLICK_3, self.L_FEED_CLICK_4], 2)
-        while 1:
+        # 选 N 卡，等"提交"按钮出现。
+        # NOTE 必须有上限：没有 N 卡可提交（或这张卡今天已经提交过、面板没打开）时，
+        #      原实现会一直长按同一批格子 -> 框架连点保护(同一按钮累计 ≥10 次)生效
+        #      -> GameTooManyClickError -> 重启游戏并记一次失败。
+        feed_round = 8
+        for _ in range(feed_round):
             self.screenshot()
             if self.appear(self.I_FEED_SUBMIT):
                 break
             for click in click_list:
                 self.click(click)
+            # 选卡属于"合法连点"（每次点击屏幕内容都在变），清掉记录避免被误判
+            self.device.click_record_clear()
+        else:
+            logger.warning(f'No N card to submit (submit button not found in {feed_round} rounds), skip this mission')
+            if not self.ui_click(self.I_UI_BACK_RED, self.I_CM_RECORDS, interval=1, timeout=5):
+                self.ui_click(self.I_UI_BACK_YELLOW, self.I_CM_RECORDS, interval=1, timeout=5)
+            return False
         logger.info('Finish to feed soul')
         # 领奖。
         #
