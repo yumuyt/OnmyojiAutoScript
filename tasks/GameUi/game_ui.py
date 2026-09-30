@@ -22,7 +22,7 @@ from module.exception import (GameNotRunningError, GamePageUnknownError)
 from module.logger import logger
 from tasks.Component.GeneralBattle.assets import GeneralBattleAssets
 from tasks.GameUi.assets import GameUiAssets
-from tasks.GameUi.page import Page, PageRegistry, page_main, random_click
+from tasks.GameUi.page import Page, PageRegistry, page_main, page_login, random_click
 from tasks.Restart.assets import RestartAssets
 from tasks.SixRealms.assets import SixRealmsAssets
 from tasks.base_task import BaseTask
@@ -223,6 +223,12 @@ class GameUi(BaseTask, GameUiAssets):
             path = path_dict.get(self.ui_current, None)
             # 找不到路径则重新获取页面重试
             if not path:
+                # 登录页没有任何出边（登录流程由 Restart 任务负责）。这里必须抛
+                # GamePageUnknownError，让 script.py 走 task_call('Restart') 去登录；
+                # 否则 ui_goto 只会在这句里空转到 60s 超时，任务干等在登录界面不动作。
+                if self.ui_current == page_login:
+                    logger.warning('Current page is page_login, it should be handled by task `Restart`')
+                    raise GamePageUnknownError('Current page is page_login')
                 self.ui_get_current_page(skip_first_screenshot)
                 continue
             skip_first_screenshot = False
