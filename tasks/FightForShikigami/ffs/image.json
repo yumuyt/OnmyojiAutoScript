@@ -1,0 +1,101 @@
+[
+  {
+    "itemName": "entry",
+    "imageName": "ffs_entry.png",
+    "roiFront": "1174,283,58,60",
+    "roiBack": "1150,140,110,430",
+    "method": "Template matching",
+    "threshold": 0.8,
+    "description": "庭院右侧挂牌列「为崽而战」入口"
+  },
+  {
+    "itemName": "refresh",
+    "imageName": "ffs_refresh.png",
+    "roiFront": "1176,518,44,40",
+    "roiBack": "1150,460,110,130",
+    "method": "Template matching",
+    "threshold": 0.8,
+    "description": "挂牌列底部刷新（循环箭头），找不到入口时点它换一批"
+  },
+  {
+    "itemName": "banquet",
+    "imageName": "ffs_banquet.png",
+    "roiFront": "452,150,40,235",
+    "roiBack": "440,138,64,260",
+    "method": "Template matching",
+    "threshold": 0.8,
+    "description": "活动主界面「八百八狸盛宴」入口（竖排旗，左右两个未解锁的注意区分）"
+  },
+  {
+    "itemName": "map_title",
+    "imageName": "ffs_map_title.png",
+    "roiFront": "505,8,262,36",
+    "roiBack": "505,8,262,36",
+    "method": "Template matching",
+    "threshold": 0.8,
+    "description": "六边形地图页标题「八百八狸·第一宴」"
+  },
+  {
+    "itemName": "battle_title",
+    "imageName": "ffs_battle_title.png",
+    "roiFront": "404,20,112,24",
+    "roiBack": "404,20,112,24",
+    "method": "Template matching",
+    "threshold": 0.8,
+    "description": "战斗入口页标题「妖怪退治」"
+  },
+  {
+    "itemName": "retreat",
+    "imageName": "ffs_retreat.png",
+    "roiFront": "1116,600,122,38",
+    "roiBack": "1100,575,160,80",
+    "method": "Template matching",
+    "threshold": 0.8,
+    "description": "战斗入口页右下角「退治」按钮"
+  },
+  {
+    "itemName": "daily_limit",
+    "imageName": "ffs_daily_limit.png",
+    "roiFront": "1117,672,128,18",
+    "roiBack": "1117,672,128,18",
+    "method": "Template matching",
+    "threshold": 0.8,
+    "description": "「每日消耗上限」文字"
+  },
+  {
+    "itemName": "stamina_limit",
+    "imageName": "ffs_stamina_limit.png",
+    "roiFront": "535,228,210,30",
+    "roiBack": "500,205,300,75",
+    "method": "Template matching",
+    "threshold": 0.8,
+    "description": "屏幕中部提示「体力消耗已达上限」——次数耗尽的终止信号"
+  },
+  {
+    "itemName": "back",
+    "imageName": "ffs_back.png",
+    "roiFront": "6,6,84,72",
+    "roiBack": "0,0,116,96",
+    "method": "Template matching",
+    "threshold": 0.8,
+    "description": "活动内左上角返回按钮（鸟居框内左箭头）——活动主界面 / 战斗入口页用这个"
+  },
+  {
+    "itemName": "back_map",
+    "imageName": "ffs_back_map.png",
+    "roiFront": "8,4,54,54",
+    "roiBack": "0,0,90,80",
+    "method": "Template matching",
+    "threshold": 0.8,
+    "description": "地图页左上角返回按钮（圆形深色按钮 + 金色弧形箭头）——与上面那个完全不同，必须分开"
+  },
+  {
+    "itemName": "done",
+    "imageName": "ffs_done.png",
+    "roiFront": "584,476,116,28",
+    "roiBack": "560,460,170,60",
+    "method": "Template matching",
+    "threshold": 0.8,
+    "description": "地图中央 POI 的「退治完成」标记——用于区分「本期已打完」和「检测异常」"
+  }
+]

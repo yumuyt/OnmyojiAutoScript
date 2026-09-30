@@ -178,6 +178,7 @@
 	<message><source>List Rule</source><translation>列表规则</translation></message>
 	<message><source>Activity Task</source><translation>限时活动</translation></message>
 	<message><source>ActivityShikigami</source><translation>当期式神爬塔</translation></message>
+	<message><source>FightForShikigami</source><translation>为崽而战</translation></message>
 	<message><source>Liver Emperor Exclusive</source><translation>肝帝专属</translation></message>
 	<message><source>BondlingFairyland</source><translation>契灵之境</translation></message>
 	<message><source>Weekly Task</source><translation>每周任务</translation></message>
@@ -226,6 +227,7 @@
 	<message><source>List Rule</source><translation>列表规则</translation></message>
 	<message><source>Activity Task</source><translation>限时活动</translation></message>
 	<message><source>ActivityShikigami</source><translation>当期式神爬塔</translation></message>
+	<message><source>FightForShikigami</source><translation>为崽而战</translation></message>
 	<message><source>Liver Emperor Exclusive</source><translation>肝帝专属</translation></message>
 	<message><source>BondlingFairyland</source><translation>契灵之境</translation></message>
 	<message><source>Weekly Task</source><translation>每周任务</translation></message>
@@ -739,5 +741,19 @@ Refresh：直接刷新，如果刷新操作进入CD，将标记为失败并退�
 	<message><source>Time Of Mystery</source><translation>强制设定出现神秘商店当天的执行时间</translation></message>
 	<message><source>time_of_mystery_help</source><translation>限定[00:00:01-23:30:00],这将使你无视掉调度器的Interval。保持默认'00:00:00'表示不使用</translation></message>
 	<message><source>TakoConfig</source><translation>石距加成</translation></message>
+</context>
+<context>
+	<name>Args</name>
+	<message><source>Banquet</source><translation>八百八狸盛宴</translation></message>
+	<message><source>limit_time</source><translation>运行时长上限</translation></message>
+	<message><source>limit_time_help</source><translation>八百八狸盛宴的运行总时长，到点后打完当前这局就收工</translation></message>
+	<message><source>limit_battle</source><translation>本次最多战斗局数</translation></message>
+	<message><source>limit_battle_help</source><translation>本次运行最多打几局，0 表示不限制（真正的限制是游戏里的每日消耗上限）</translation></message>
+	<message><source>battle_cost</source><translation>单局消耗</translation></message>
+	<message><source>battle_cost_help</source><translation>单次「退治」消耗的次数，游戏内按钮上显示为 x6</translation></message>
+	<message><source>daily_cost_limit</source><translation>每日消耗上限</translation></message>
+	<message><source>daily_cost_limit_help</source><translation>游戏内「每日消耗上限」的总量，读满即视为今日次数已用完</translation></message>
+	<message><source>random_sleep</source><translation>点击战斗前随机休息</translation></message>
+	<message><source>ffs_random_sleep_help</source><translation>点「退治」开始战斗前，有 20% 概率随机停 2~6 秒，用来打散固定节奏（防封）。与项目里其它任务的做法一致</translation></message>
 </context>
 </TS>

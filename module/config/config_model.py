@@ -61,6 +61,7 @@ from tasks.Quiz.config import Quiz
 from tasks.KittyShop.config import KittyShop
 from tasks.DyeTrials.config import DyeTrials
 from tasks.BudokaiTournament.config import BudokaiTournament
+from tasks.FightForShikigami.config import FightForShikigami
 # ----------------------------------------------------------------------------------------------------------------------
 
 # 肝帝专属---------------------------------------------------------------------------------------------------------------
@@ -125,6 +126,7 @@ class ConfigModel(ConfigBase):
     quiz: Quiz = Field(default_factory=Quiz)
     kitty_shop: KittyShop = Field(default_factory=KittyShop)
     dye_trials: DyeTrials = Field(default_factory=DyeTrials)
+    fight_for_shikigami: FightForShikigami = Field(default_factory=FightForShikigami)
 
     # 这些是肝帝专属
     bondling_fairyland: BondlingFairyland = Field(default_factory=BondlingFairyland)

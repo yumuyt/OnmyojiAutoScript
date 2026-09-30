@@ -1,0 +1,20 @@
+[
+  {
+    "itemName": "daily_cost",
+    "roiFront": "1155,695,85,20",
+    "roiBack": "1155,695,85,20",
+    "mode": "DigitCounter",
+    "method": "Default",
+    "keyword": "",
+    "description": "每日消耗上限计数（已消耗/上限）"
+  },
+  {
+    "itemName": "banquet_status",
+    "roiFront": "500,42,280,34",
+    "roiBack": "500,42,280,34",
+    "mode": "Single",
+    "method": "Default",
+    "keyword": "",
+    "description": "地图页顶部状态行：已开启是「本宴X时X分X秒后结束」，未开启是「本宴X分X秒后开启挑战」"
+  }
+]

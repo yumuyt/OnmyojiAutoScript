@@ -215,6 +215,22 @@ page_touch_fish = Page(WeeklyTriflesAssets.I_CHECK_TOUCH_FISH)
 page_guild.link(button=WeeklyTriflesAssets.I_GUILD_GOTO_TF,destination=page_touch_fish)
 page_touch_fish.link(button=WeeklyTriflesAssets.I_WT_TF_GOTO_MAIN,destination=page_main)
 
+# ************************************* 限时活动：为崽而战 *****************************************#
+# 这几页必须注册：任务启动时游戏可能正停在里面（上次中断残留 / 手动点进去了），
+# 不注册的话 ui_get_current_page() 会判定 Unknown page -> 抛 GamePageUnknownError
+# -> script.py 里 task_call('Restart') 强制重启游戏。
+from tasks.FightForShikigami.assets import FightForShikigamiAssets as FFS
+
+# 为崽而战 活动主界面（有「八百八狸盛宴」竖排旗的那页）
+page_fight_for_shikigami = Page(FFS.I_FFS_BANQUET)
+page_fight_for_shikigami.link(button=FFS.I_FFS_BACK, destination=page_main)
+# 八百八狸盛宴 六边形地图（高亮格所在页）
+page_fight_for_shikigami_map = Page(FFS.I_FFS_MAP_TITLE)
+page_fight_for_shikigami_map.link(button=FFS.I_FFS_BACK_MAP, destination=page_fight_for_shikigami)
+# 妖怪退治 战斗入口页
+page_fight_for_shikigami_battle = Page(FFS.I_FFS_BATTLE_TITLE)
+page_fight_for_shikigami_battle.link(button=FFS.I_FFS_BACK, destination=page_fight_for_shikigami_map)
+
 
 # ************************************* 战斗部分 *****************************************#
 # 战斗界面
