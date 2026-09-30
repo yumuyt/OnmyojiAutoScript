@@ -110,10 +110,13 @@ class ScriptTask(RightActivity, FrogBossAssets, GeneralBattleAssets):
                 logger.warning(f'FrogBoss: {timeout} 秒内没有回到下注界面')
                 return False
             if self.appear_then_click(self.I_BET_SUCCESS_BOX, interval=1):
+                logger.info('FrogBoss: 结算页 -> 开宝箱')
                 continue
             if self.appear_then_click(self.I_REWARD, interval=2):
+                logger.info('FrogBoss: 结算页 -> 领取奖励')
                 continue
             if self.appear_then_click(self.I_NEXT_COMPETITION, interval=4):
+                logger.info('FrogBoss: 结算页 -> 下一局')
                 continue
 
     def next_run(self):
