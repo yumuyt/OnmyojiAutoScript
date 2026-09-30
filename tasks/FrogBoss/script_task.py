@@ -145,6 +145,10 @@ class ScriptTask(RightActivity, FrogBossAssets, GeneralBattleAssets):
         flag_glod_30 = 0
         count_left = self.O_LEFT_COUNT.ocr(self.device.image)
         count_right = self.O_RIGHT_COUNT.ocr(self.device.image)
+        logger.info(f'Bet count: left {count_left}, right {count_right}')
+        if not count_left and not count_right:
+            # 读不出来时 Majority / Minority 会退化成固定押右，这种静默退化必须留痕
+            logger.warning('FrogBoss: 左右押注数都没读出来（OCR 区域可能又变了），策略会退化成固定押右')
         match self.config.model.frog_boss.frog_boss_config.strategy_frog:
             case Strategy.Majority:
                 click_image = self.I_BET_LEFT if count_left > count_right else self.I_BET_RIGHT
