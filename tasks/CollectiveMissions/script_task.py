@@ -93,6 +93,9 @@ class ScriptTask(GameUi, CollectiveMissionsAssets):
             self.screenshot()
             if self.appear(self.I_CM_SHRINE) or self.appear(self.I_CHECK_MAIN):
                 break
+            if self.ui_reward_appear_click(False):
+                # 兜底：残留的奖励弹窗（例如自动发放的奖励晚一拍才弹出来）
+                continue
             if self.appear_then_click(self.I_UI_BACK_RED, interval=1):
                 continue
             if self.appear_then_click(self.I_UI_BACK_YELLOW, interval=1):
@@ -424,20 +427,56 @@ class ScriptTask(GameUi, CollectiveMissionsAssets):
             for click in click_list:
                 self.click(click)
         logger.info('Finish to feed soul')
-        # 还有一点很重要的，捐赠会有双倍的，需要领两次
+        # 领奖。
+        #
+        # 「远远不够」提交 N 卡后奖励是**自动发放**的：可能一次弹窗都没有（直接回到任务列表），
+        # 也可能只弹一次（前 10 次的双倍额度已被别的任务用掉时）。
+        # 原实现以「领够 2 次」为唯一出口，遇到这两种情况就会一直空转，直到设备 stuck
+        # 检测(60s)抛 GameStuckError —— 表现就是"提交完就呆在那里"。
+        # （_donate 之前遇到过同样的问题并已修好，这里与它保持一致）
+        #
+        # 现在四种情况都会退出：
+        #   1) 领够 2 次（双倍生效）；2) 领到 1 次后再等 5s；
+        #   3) 已回到任务列表且连续 3s 没有奖励弹窗；4) 整个领奖阶段兜底 30s。
         reward_number = 0
+        submitted = False
+        total_timer = Timer(30).start()   # 整个领奖阶段的兜底超时
+        second_timer = Timer(5).start()   # 领到第 1 次后，再给第 2 次留的等待时间
+        list_timer = Timer(3).start()     # 已经回到任务列表后的确认时间
         while 1:
             self.screenshot()
 
-            if reward_number >= 2:
-                break
             if self.ui_reward_appear_click(False):
                 reward_number += 1
+                second_timer.reset()
+                total_timer.reset()
+                list_timer.reset()
                 continue
+
+            if reward_number >= 2:
+                logger.info('双倍奖励生效，已领 2 次')
+                break
+            if reward_number >= 1 and second_timer.reached():
+                logger.info('本次只有 1 次奖励弹窗（双倍额度已用完），继续')
+                break
+            if total_timer.reached():
+                logger.warning(f'领奖超时，本次已领 {reward_number} 次')
+                break
+
             if self.appear_then_click(self.I_FEED_SUBMIT, interval=1):
+                submitted = True
+                list_timer.reset()
                 continue
+
+            if submitted and self.appear(self.I_CM_RECORDS):
+                # 提交已点过、奖励弹窗也不再出现、而且人已经在任务列表上 → 奖励是自动发的
+                if list_timer.reached():
+                    logger.info('奖励已自动发放，已回到任务列表，结束领奖')
+                    break
+            else:
+                list_timer.reset()
         self.ui_reward_appear_click(True)
-        logger.info('Donate finished')
+        logger.info('Feed finished')
         return True
 
 
