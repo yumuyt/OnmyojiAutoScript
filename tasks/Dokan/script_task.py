@@ -44,6 +44,25 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
     green_mark_done: bool = False
     switch_soul_done: bool = False
 
+    # "确认退出集结场景吗?" 弹窗的确认按钮位置固定(实测 x 674~808, y 384~448, 中心约 741,416)。
+    # 2026-09-30 的失败经过: 该弹窗在当前客户端(2.8.78)下渲染得极暗(面板亮度仅 13/255,
+    # 按钮区域与 I_RYOU_DOKAN_EXIT_ENSURE 的匹配度只有 0.04), 图像素材认不出来; 而
+    # I_RYOU_DOKAN_QUIT_BATTLE_ENSURE 的搜索区域是全屏、阈值 0.8, TM_CCOEFF_NORMED 在这种
+    # 大片低对比度区域(面板 std≈1)会产生虚高分数(实测在空白面板 (474,294) 上得到 0.844),
+    # 于是 goto_main 在弹窗上反复"点空白", 10 次后触发 GameTooManyClickError, 脚本误判
+    # 游戏卡死并重启, 且因为异常抛在 next_run 之前, 任务的排程没有更新。
+    #
+    # 下面两个规则供 goto_main 兜底使用(assets.py 由 dev_tools/assets_extract.py 自动生成, 不改它):
+    # 1) 同图素材, 但把搜索区域(roi_back)收窄到弹窗内部 —— 实测虚高匹配消失(最高 0.23 < 0.8)
+    I_RYOU_DOKAN_QUIT_BATTLE_ENSURE_IN_DIALOG = RuleImage(
+        roi_front=(600, 345, 420, 200), roi_back=(600, 345, 420, 200),
+        threshold=0.8, method="Template matching",
+        file="./tasks/Dokan/res/res_ryou_dokan_quit_battle_ensure.png")
+    # 2) 实在认不出来时, 按坐标点弹窗的"确认"按钮
+    C_DOKAN_QUIT_DIALOG_ENSURE = RuleClick(
+        roi_front=(711, 402, 60, 28), roi_back=(711, 402, 60, 28),
+        name="dokan_quit_dialog_ensure")
+
     @cached_property
     def _attack_priorities(self) -> list:
         return [self.I_RYOU_DOKAN_ATTACK_PRIORITY_0,
@@ -306,9 +325,12 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
             continue
 
         # 保持好习惯，一个任务结束了就返回到庭院，方便下一任务的开始
-        self.goto_main()
-
-        self.next_run(skip_today=False, is_dokan_activated=is_dokan_activated)
+        # NOTE 收尾(回庭院)失败也必须更新排程: 否则异常抛出时 next_run 不会执行,
+        #      重启后本任务会被立刻再次拉起, 空跑一次
+        try:
+            self.goto_main()
+        finally:
+            self.next_run(skip_today=False, is_dokan_activated=is_dokan_activated)
         raise TaskEnd
 
     def dokan_battle_1(self, cfg: Dokan, count=None):
@@ -501,23 +523,58 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
 
             任意庭院->道馆的界面返回庭院
         """
-        while 1:
+        # NOTE 进度保护: 这里原来是 while 1 且没有任何兜底。游戏当前版本(客户端 2.8.78)的
+        #      "确认退出集结场景吗?" 弹窗是极低对比度的深色弹窗(实测面板亮度 13, 按钮区域
+        #      与素材的匹配度只有 0.04~0.23), 图像素材认不出来时:
+        #        - 旧代码靠全屏搜索的 I_RYOU_DOKAN_QUIT_BATTLE_ENSURE 误报, 反复点同一个按钮,
+        #          10 次后把自己点成 GameTooManyClickError(见 2026-09-30 19:22 的日志);
+        #        - 若误报被修掉, 又会变成一直空转。
+        #      因此: 有限次重试 + 长时间没进展时按坐标兜底点弹窗的"确认"按钮。
+        idle_round = 0
+        max_idle_round = 5
+        fallback_used = 0
+        for _ in range(24):
             self.screenshot()
             if self.appear(self.I_CHECK_MAIN):
-                break
-            if self.appear(self.I_RYOU_DOKAN_QUIT_BATTLE_ENSURE):
+                return True
+            # "确认退出集结场景吗?" 弹窗: 有专用素材且 ROI 就是按钮位置, 直接点掉
+            if self.appear(self.I_RYOU_DOKAN_EXIT_ENSURE):
+                self.ui_click_until_disappear(self.I_RYOU_DOKAN_EXIT_ENSURE, interval=2)
+                idle_round = 0
+                continue
+            if self.appear(self.I_RYOU_DOKAN_QUIT_BATTLE_ENSURE_IN_DIALOG):
                 # 借用下,猜测是一样的确定按钮,如果不一样,会卡住
-                self.ui_click_until_disappear(self.I_RYOU_DOKAN_QUIT_BATTLE_ENSURE, interval=2)
+                # NOTE 这里用收窄过搜索区域的同图素材, 不再用全屏搜索的
+                #      I_RYOU_DOKAN_QUIT_BATTLE_ENSURE(会在低对比度的深色弹窗上误报, 见类属性注释)
+                self.ui_click_until_disappear(self.I_RYOU_DOKAN_QUIT_BATTLE_ENSURE_IN_DIALOG, interval=2)
+                idle_round = 0
                 continue
             if self.appear(self.I_RYOU_DOKAN_DOKAN_QUIT):
                 self.click(self.I_RYOU_DOKAN_DOKAN_QUIT, interval=3)
+                idle_round = 0
                 continue
             if self.appear(self.I_BACK_BL):
                 self.click(self.I_BACK_BL, interval=3)
+                idle_round = 0
                 continue
             if self.appear(self.I_BACK_Y):
                 self.click(self.I_BACK_Y, interval=3)
+                idle_round = 0
                 continue
+            # 以上都没命中: 大概率是卡在认不出来的弹窗上
+            idle_round += 1
+            if idle_round <= max_idle_round:
+                continue
+            # 按固定坐标点弹窗的"确认"按钮, 最多试 2 次, 避免把同一个按钮点成 GameTooManyClickError
+            if fallback_used >= 2:
+                logger.warning("dokan: goto main failed, give up")
+                return False
+            fallback_used += 1
+            logger.info(f"dokan: goto main stuck, click quit dialog ensure by coordinate, "
+                        f"idle_round={idle_round}, fallback={fallback_used}")
+            self.click(self.C_DOKAN_QUIT_DIALOG_ENSURE, interval=2)
+        logger.warning("dokan: goto main failed, give up")
+        return False
 
     def goto_dokan_scene(self):
         # 截图速度太快会导致在道馆-神社之间一直循环无法退出,故设置截图间隔
