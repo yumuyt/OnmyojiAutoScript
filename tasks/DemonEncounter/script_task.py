@@ -186,21 +186,37 @@ class ScriptTask(GameUi, GeneralBattle, DemonEncounterAssets, SwitchSoul):
         # 延长时间并在战斗结束后改回来
         self.device.stuck_timer_long = Timer(480, count=480).start()
         preset_switched = False
+        # "集结中"和"准备"同时可见时的升级计时: 准备按钮的 ROI(1128,536,100,100) 与
+        # 集结挑战/集结中按钮的 ROI(1087,562,100,36) 是重叠的, 所以不能一看到亮块就
+        # 当成准备页(那样会在集结阶段误开一场"战斗", 然后落进 battle_wait 等 480s 长卡死)。
+        # 正常集结(oas1 2026-10-01 实测 106s / oas2 37s)照旧等; 只有两个元素同时可见
+        # 且持续超过 180s 才升级去处理准备页 —— 比 device 的 480s 硬卡死早 5 分钟出来。
+        gather_wait_timer = Timer(180)
         while True:
             self.screenshot()
             if self.appear(self.I_BOSS_DONE_CHECK):
                 break
+            appear_prepare = self.appear(self.I_PREPARE_HIGHLIGHT)
             if self.appear(self.I_BOSS_GATHER):
-                self.device.stuck_record_clear()
-                self.device.stuck_record_add('BATTLE_STATUS_S')
-                logger.info('Boss Gathering...')
-                sleep(2)
-                continue
+                if appear_prepare:
+                    if not gather_wait_timer.started():
+                        gather_wait_timer.start()
+                else:
+                    gather_wait_timer.clear()
+                if not (appear_prepare and gather_wait_timer.reached()):
+                    self.device.stuck_record_clear()
+                    self.device.stuck_record_add('BATTLE_STATUS_S')
+                    logger.info('Boss Gathering...' + (' (prepare button also visible)' if appear_prepare else ''))
+                    sleep(2)
+                    continue
+                logger.warning(f'Gather flag and prepare button both stay for '
+                               f'{gather_wait_timer.current():.0f}s, handle prepare page first')
             if self.appear(self.I_BOSS_WAIT):
                 logger.info('Boss battle failed, waiting for 2 seconds...')
                 sleep(2)
                 continue
-            if self.appear(self.I_PREPARE_HIGHLIGHT):
+            if appear_prepare:
+                gather_wait_timer.clear()
                 if preset_switched:
                     self.run_general_battle()
                     continue
@@ -519,6 +535,13 @@ class ScriptTask(GameUi, GeneralBattle, DemonEncounterAssets, SwitchSoul):
         # 战斗过程 随机点击和滑动 防封
         logger.info("Start battle process")
         check_timer = None
+        # "准备"兜底: battle_before 的预算可能被切阵容吃光, 或者那唯一一次点击被游戏吞掉,
+        # 这时脚本会停在准备界面干等到 480 秒长卡死才报错。
+        # 背景: 2026-10-01 17:11 oas1 极逢魔 在准备页空了 5 分 20 秒(靠人手动点准备才开打),
+        # 因为加了 BATTLE_STATUS_S 连报错都没有。这里给一小笔额外预算, 自己会找机会补点。
+        rescue_left = self.PREPARE_RESCUE_CLICK_LIMIT
+        rescue_timer = Timer(8).start()  # 先给游戏 8 秒自己进战斗的机会
+        rescue_window = Timer(self.PREPARE_RESCUE_WINDOW).start()
         while 1:
             self.screenshot()
             if self.appear(self.I_DE_WIN):
@@ -542,6 +565,11 @@ class ScriptTask(GameUi, GeneralBattle, DemonEncounterAssets, SwitchSoul):
                 logger.warning('False battle')
                 self.ui_click_until_disappear(self.I_FALSE)
                 return False
+            # 还停在准备界面 -> 兜底补点"准备"
+            if rescue_left > 0 and not rescue_window.reached() and rescue_timer.reached():
+                if self.press_prepare(ignore_budget=True):
+                    rescue_left -= 1
+                    continue
             # 时间到
             if check_timer and check_timer.reached():
                 logger.warning('Obtain battle timeout')

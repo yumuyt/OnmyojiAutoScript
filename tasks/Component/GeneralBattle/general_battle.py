@@ -30,6 +30,12 @@ class GeneralBattle(BattleWait, GeneralBuff):
     PREPARE_CLICK_INTERVAL = (1.0, 1.6)  # 两次"准备"之间的随机间隔(秒)
     PREPARE_CLICK_LIMIT = 6  # 单场战斗最多补点几次(连点保护: 同一按钮 10 次 / 最近 15 次点击)
     PREPARE_CLICK_WAIT = 25  # 准备阶段的补点总预算(秒)
+    # battle_before 的预算用完之后, battle_wait 里还能再补点几次"准备"。
+    # 背景: 2026-10-01 17:11 oas1 极逢魔, 切阵容吃掉 5 秒预算里的 4 秒, 唯一一次"准备"
+    # 落在预设面板收起动画里被游戏吞掉, 之后 5 分 20 秒一次都没点 —— 画面停在准备页,
+    # 因为 battle_wait 加了 BATTLE_STATUS_S(480s 长卡死), 连报错都没有, 只能人工点。
+    PREPARE_RESCUE_CLICK_LIMIT = 6  # battle_wait 阶段兜底补点的次数上限
+    PREPARE_RESCUE_WINDOW = 120  # 兜底补点只在这段时间内做(秒), 免得长战斗里误判乱点
 
     _prepare_click_count = 0  # 本场战斗已经点了几次"准备"，类属性只作默认值
     _prepare_next_click = 0.0  # 下一次允许点"准备"的时间戳
@@ -39,16 +45,18 @@ class GeneralBattle(BattleWait, GeneralBuff):
         self._prepare_click_count = 0
         self._prepare_next_click = 0.0
 
-    def press_prepare(self) -> bool:
+    def press_prepare(self, ignore_budget: bool = False) -> bool:
         """
         按一次"准备": 按钮亮着才按，落点仍是 RuleImage.coord() 的正态随机点，
         两次点击之间随机间隔，单场有次数上限(超了就只等不点，免得触发连点保护)。
 
         背景: 2026-10-01 06:26 / 06:29 两次 GameStuckError 都是"点了一次准备、
         游戏在过场动画里把这次输入丢掉、之后没人再点"导致的。
+        :param ignore_budget: True 表示不受 battle_before 的 6 次预算限制,
+                              给 battle_wait 阶段的兜底补点用(它自己另有次数上限)
         :return: 本次是否按下
         """
-        if self._prepare_click_count >= self.PREPARE_CLICK_LIMIT:
+        if not ignore_budget and self._prepare_click_count >= self.PREPARE_CLICK_LIMIT:
             return False
         if time.time() < self._prepare_next_click:
             return False
@@ -59,7 +67,8 @@ class GeneralBattle(BattleWait, GeneralBuff):
         x, y = self.I_PREPARE_HIGHLIGHT.coord()
         self.device.click(x, y, control_name=self.I_PREPARE_HIGHLIGHT.name)
         self._prepare_click_count += 1
-        logger.info(f'Press prepare ({self._prepare_click_count}/{self.PREPARE_CLICK_LIMIT})')
+        logger.info(f'Press prepare ({self._prepare_click_count}/{self.PREPARE_CLICK_LIMIT}'
+                    f'{", rescue" if ignore_budget else ""})')
         return True
 
     def run_general_battle(self, config: GeneralBattleConfig = None, buff: BuffClass or list[BuffClass] = None) -> bool:
@@ -112,8 +121,16 @@ class GeneralBattle(BattleWait, GeneralBuff):
                     prepare_timer.start()
                 if not getattr(config, 'lock_team_enable', False):  # 没有锁定阵容
                     if self.current_count == 1 and not confed:  # 第一次战斗且是本次第一次配置
+                        # 进切阵容之前再看一眼: 共斗战斗(逢魔boss之类)会在你切阵容的过程中
+                        # 自己开打, 那时左下角从"预设"变成"自动/手动", 切阵容注定失败。
+                        # 背景: 2026-10-01 17:07 / 17:10 oas2 两次 GameStuckError 就是这样。
+                        if self.is_in_real_battle(False):
+                            sleep(random.uniform(0.3, 0.5))
+                            continue
                         self.switch_preset_team(config.preset_enable, config.preset_group, config.preset_team)
-                        self.check_and_open_buff(buff)
+                        # 切阵容期间被队友带进战斗的话, 加成面板已经不存在了, 别再去点
+                        if not self.is_in_real_battle(False):
+                            self.check_and_open_buff(buff)
                         confed = True
                         # 预设面板收起需要时间, 这段时间点"准备"会被游戏吞掉。
                         # 拟人也一样: 等面板消失、按钮亮起来再按。
@@ -448,6 +465,12 @@ class GeneralBattle(BattleWait, GeneralBuff):
 
         logger.info("Preset is enable")
         # 点击预设按钮
+        # 这个循环以前没有出口: 只有"预设确认面板出现"和"队伍不足5人"两个正常分支。
+        # 2026-10-01 17:07 / 17:10 oas2 两次 GameStuckError: 共斗荒骷髅战斗在切阵容的
+        # 这段时间里自己开打了, 左下角变成"自动/手动", O_PRESET/O_PRESET_FULL 的
+        # keyword('预'/'预设')永远匹配不上 -> 一次点击都发不出, 循环空转到 60 秒零点击,
+        # 被 device 判卡死 -> 重启整个游戏客户端, 正在打的逢魔boss直接报废。
+        preset_timer = Timer(12).start()  # 最迟 12 秒还没等到预设面板就放弃切阵容
         while 1:
             self.screenshot()
 
@@ -456,6 +479,15 @@ class GeneralBattle(BattleWait, GeneralBuff):
             # 首个队伍没有满足5个式神，未出现预设按钮的情况下跳出循环
             if self.appear(self.I_PRESENT_LESS_THAN_5):
                 break
+            # 战斗已经开打 / 已经结算: 预设面板再也不会出现, 立刻放弃切阵容
+            if (self.is_in_real_battle(False) or self.appear(self.I_DE_WIN)
+                    or self.appear(self.I_WIN) or self.appear(self.I_FALSE)
+                    or self.appear(self.I_REWARD)):
+                logger.warning('Preset panel not found, battle has already started, skip preset switch')
+                return None
+            if preset_timer.reached():
+                logger.warning('Preset button not found in 12s, skip preset switch')
+                return None
             if self.appear_then_click(self.I_PRESET, threshold=0.8, interval=1):
                 continue
             if self.appear_then_click(self.I_PRESET_WIT_NUMBER, threshold=0.8, interval=1):
