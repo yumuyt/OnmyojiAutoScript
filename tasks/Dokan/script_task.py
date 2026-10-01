@@ -57,6 +57,14 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
     #            当时"剩余突破时间"还有 10 分钟、对面还剩 46 人, 道馆根本没结算
     # 因此: 只要还没见过结算页(道馆胜利/夺得资金), 就绝不确认退出, 改成点"取消"并留在道馆里
     #       等结算(自己次数打完也一样), 直到结算页出现或道馆活动时间(剩余突破时间+宽限)走完。
+    #
+    # NOTE "每天两次 + 投票放弃再战" 的流程(游戏自带, 代码里原本就有):
+    #   每日攻击次数 2 + 馆主攻击策略 AttackDokanMasterType(ATTACK_X_Y = 第一个道馆打 X 次馆主 /
+    #   第二个道馆打 Y 次馆主) —— 僵尸寮常见打法是第一个道馆故意不赢(不打馆主/放弃突破),
+    #   等游戏给出"保留赏金(领了收工) / 再战道馆(去打第二个)"面板, 选再战, 第二个才真打馆主。
+    #   放弃掉的那个道馆奖励是有意不要的, 所以: 见到该面板(FAILED_VOTE)就算"当前道馆已了结"、
+    #   可以退出; 而每进入一个新道馆(start_new_dokan)都要把门控重新上锁, 否则第一个道馆的
+    #   "已了结"会一路带到第二个道馆, 把真正要保的那份结算放走。
     dokan_joined: bool = False
     dokan_settled: bool = False
     _remain_count_updated: bool = False
@@ -256,6 +264,9 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
             # 场景状态：道馆集结中
             if current_scene == DokanScene.RYOU_DOKAN_SCENE_GATHERING:
                 logger.debug(f"Ryou DOKAN gathering...")
+                # 集结中 = 这个道馆还没开打, 不可能是"已结算"状态; 第二个道馆(再战)从这里开始时
+                # 把上一个道馆的结算门控清掉, 免得把该保的结算放走
+                self.start_new_dokan()
                 # 如果还未选择优先攻击，选一下
                 if not self.attack_priority_selected:
                     self.dokan_choose_attack_priority(attack_priority=attack_priority)
@@ -372,20 +383,31 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
             # 投票 是否放弃突破   放弃/继续
             if current_scene == DokanScene.RYOU_DOKAN_SCENE_ABANDON_VOTE:
                 # 一般来说,都是点放弃
+                # NOTE 只投票不结算: 放弃票通过之后游戏才会给"保留赏金/再战道馆"面板,
+                #      结算门控到那个面板(FAILED_VOTE)再放行, 这里不乱标"已了结"
                 self.click(self.I_RYOU_DOKAN_ABANDONED_TOPPA_ABANDONED)
                 continue
             # 投票 再战道馆/保留赏金
             if current_scene == DokanScene.RYOU_DOKAN_SCENE_FAILED_VOTE:
-                # 每天打一次的直接 选择 保留赏金,
-                # 打两次的,第一次选择 继续挑战,第二次没有选项
+                # 这个面板出现 = 当前道馆已经失败/投降(游戏自己认定), 是"每天两次"的关键节点:
+                #   打两次(daily_attack_count=2): 第一次到这里要选"再战道馆", 才能去打第二个道馆
+                #                                (僵尸寮就是靠这个把两次机会都用上, 只赢最后那个);
+                #   打一次: 选"保留赏金"收工。
+                # 两种选择都意味着"当前道馆的奖励已经了结"(保留赏金=领了, 再战=有意放弃),
+                # 所以这里放行退出; 第二个道馆开始时 start_new_dokan() 会重新把门控关上。
+                clicked = False
                 if cfg.attack_count_config.daily_attack_count == 2:
                     if self.appear(self.I_RYOU_DOKAN_FAILED_VOTE_BATTLE_AGAIN):
+                        logger.info("Dokan challenge failed: vote for battle again (go for the 2nd dokan)")
                         self.ui_click_until_disappear(self.I_RYOU_DOKAN_FAILED_VOTE_BATTLE_AGAIN)
-                else:
-                    if self.appear(self.I_RYOU_DOKAN_FAILED_VOTE_KEEP_BOUNTY):
-                        logger.info("Dokan challenge failed: vote for keep the awards")
-                        self.ui_click_until_disappear(self.I_RYOU_DOKAN_FAILED_VOTE_KEEP_BOUNTY)
-                    # 保留赏金 = 本次道馆的奖励已经按游戏规则结清, 之后退出道馆不会丢奖励
+                        clicked = True
+                # 打两次的"第二次"游戏可能不再给"再战"这个选项(原注释: 第二次没有选项),
+                # 这时只剩"保留赏金"可选 —— 不兜底就会对着这个面板空转
+                if not clicked and self.appear(self.I_RYOU_DOKAN_FAILED_VOTE_KEEP_BOUNTY):
+                    logger.info("Dokan challenge failed: vote for keep the awards")
+                    self.ui_click_until_disappear(self.I_RYOU_DOKAN_FAILED_VOTE_KEEP_BOUNTY)
+                    clicked = True
+                if clicked:
                     self.dokan_settled = True
                 continue
             # 场景状态：道馆已经结束(寮境里已经没有"挑战"按钮了)
@@ -707,6 +729,8 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
         """
             如果道馆已经开启,进入寮境
         """
+        # 每次从地图进入一个道馆, 都算开始打这个道馆(第一个或"再战"的第二个): 门控重新上锁
+        self.start_new_dokan()
         try_count = 0
         while try_count < 5:
             self.screenshot()
@@ -862,6 +886,8 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
                     self.config.dokan.attack_count_config.del_attack_count(1, self.config.save)
                     # 恢复初始位置信息,防止下次使用出错
                     restore_roi()
+                    # 挑中一个新道馆(可能是"再战"的第二个): 门控重新上锁
+                    self.start_new_dokan()
                     return True
                 # 滑动道馆列表
                 self.swipe(self.S_DOKAN_LIST_UP)
@@ -882,6 +908,8 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
             self.ui_click_until_disappear(self.I_CHALLENGE_ENSURE, interval=1)
             # 更新可挑战次数
             self.config.dokan.attack_count_config.del_attack_count(1, self.config.save)
+            # 挑中一个新道馆(可能是"再战"的第二个): 门控重新上锁
+            self.start_new_dokan()
             return True
         return False
 
@@ -1036,6 +1064,27 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
         if scene in self.DOKAN_INSIDE_SCENES:
             self.dokan_joined = True
 
+    def start_new_dokan(self) -> None:
+        """开始打一个新道馆: 结算门控和"等结算"的计时全部清零
+
+        NOTE 游戏里一天最多打两个道馆, 而且第一个常常是"主动失败/投票放弃"掉、再投票
+              "再战道馆"去打第二个(每日攻击次数=2, 馆主攻击策略 AttackDokanMasterType 里的
+              ATTACK_X_Y 就是"第一个道馆打 X 次馆主 / 第二个道馆打 Y 次馆主"):
+               - 第一个道馆放弃掉之后允许退出道馆(奖励是有意不要的);
+               - 但第二个道馆的结算页出现之前同样不能退, 所以每进入一个新道馆都要把门控重新关上,
+                 否则第一个道馆的"已了结"状态会一路带到第二个道馆, 把该保的奖励放走。
+        """
+        if self.dokan_settled or self._settlement_deadline is not None:
+            logger.info("dokan: a new dokan starts, reset the settlement gate")
+        self.dokan_settled = False
+        self._settlement_deadline = None
+        self._settlement_wait_start = None
+        self._settlement_wait_last_log = None
+        self._settled_page_clicks = 0
+        # 第二个道馆要把"今日可挑战机会"重新读一遍(第一次用掉一次之后变成 1 次/0 次),
+        # next_run() 靠这个值决定要不要再排一次
+        self._remain_count_updated = False
+
     def exit_allowed(self) -> bool:
         """现在退出道馆会不会丢本次突破奖励
 
@@ -1170,15 +1219,16 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
         if self.appear(self.I_DOKAN_ABANDONED_TOPPA_TITLE):
             if self.appear(self.I_RYOU_DOKAN_ABANDONED_TOPPA_ABANDONED):
                 self.ui_click_until_disappear(self.I_RYOU_DOKAN_ABANDONED_TOPPA_ABANDONED)
+            # NOTE 这里只是投了"放弃"票, 要等寮里投票通过后游戏给出"保留赏金/再战道馆"面板才算
+            #      这个道馆了结(见 run() 的 FAILED_VOTE 分支), 所以不在这里标 dokan_settled
 
         #
         # 再战道馆
         else:
-            # 保留赏金
+            # 保留赏金 = 本次道馆的奖励按游戏规则结清, 之后退出道馆不会丢奖励
             if self.appear(self.I_RYOU_DOKAN_FAILED_VOTE_KEEP_BOUNTY):
                 self.ui_click_until_disappear(self.I_RYOU_DOKAN_FAILED_VOTE_KEEP_BOUNTY)
-        # 主动放弃突破/投票保留赏金之后, 本次道馆的奖励已经按游戏规则结清, 可以正常退出道馆了
-        self.dokan_settled = True
+                self.dokan_settled = True
 
     def switch_soul_in_dokan(self):
         if self.switch_soul_done:

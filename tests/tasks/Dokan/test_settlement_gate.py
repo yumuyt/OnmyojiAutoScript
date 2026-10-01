@@ -46,6 +46,8 @@ def make_task(appear_set=(), countdown='剩余突破时间14:38'):
     t.screenshot = lambda: None
     t.wait_until_appear = lambda *a, **k: True
     t.ui_click_until_disappear = lambda *a, **k: t.clicked.append(a[0]) or True
+    t.ui_click = lambda *a, **k: t.clicked.append(a[0]) or True
+    t.click_until_smt_disappear = lambda *a, **k: True
     t.appear = types.MethodType(_fake_appear, t)
     t.dokan_remain_seconds = types.MethodType(_fake_remain, t)
     return t
@@ -86,6 +88,44 @@ def test_cancel_exit_dokan_caps_repeated_clicks():
     t = make_task()
     assert [t.cancel_exit_dokan() for _ in range(4)] == [True, True, True, False]
     assert len(t.clicked) == ScriptTask.EXIT_CANCEL_MAX
+
+
+def test_start_new_dokan_rearms_the_gate():
+    """一天两个道馆: 第一个(主动失败/放弃)了结后, 进第二个要把门控重新上锁"""
+    t = make_task()
+    t.dokan_joined = True
+    t.dokan_settled = True
+    t._settlement_deadline = datetime.now() + timedelta(minutes=5)
+    t._settlement_wait_start = datetime.now()
+    t._settlement_wait_last_log = datetime.now()
+    t._settled_page_clicks = 3
+    t._remain_count_updated = True
+
+    t.start_new_dokan()
+
+    assert t.dokan_settled is False
+    assert t._settlement_deadline is None
+    assert t._settlement_wait_start is None
+    assert t._settled_page_clicks == 0
+    assert t._remain_count_updated is False
+    # 第二个道馆的结算页没出现之前, 又不许退了
+    assert t.exit_allowed() is False
+
+
+def test_abandoned_toppa_keep_bounty_settles_but_abandon_vote_does_not():
+    """放弃票本身不算了结(要等寮里投过、游戏给出保留赏金/再战面板), 保留赏金才算"""
+    # 只有放弃投票按钮: 投完票不能标 settled
+    t = make_task(appear_set={ScriptTask.I_DOKAN_ABANDONED_TOPPA_TITLE,
+                              ScriptTask.I_RYOU_DOKAN_ABANDONED_TOPPA_ABANDONED})
+    t.abandoned_toppa()
+    assert ScriptTask.I_RYOU_DOKAN_ABANDONED_TOPPA_ABANDONED in t.clicked
+    assert t.dokan_settled is False
+
+    # 投票结果面板: 保留赏金 -> 奖励结清, 可以退出道馆
+    t = make_task(appear_set={ScriptTask.I_RYOU_DOKAN_FAILED_VOTE_KEEP_BOUNTY})
+    t.abandoned_toppa()
+    assert t.clicked == [ScriptTask.I_RYOU_DOKAN_FAILED_VOTE_KEEP_BOUNTY]
+    assert t.dokan_settled is True
 
 
 def test_note_scene_marks_joined_only_inside_a_dokan():
