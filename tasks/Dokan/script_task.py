@@ -44,6 +44,36 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
     green_mark_done: bool = False
     switch_soul_done: bool = False
 
+    # ===== 道馆结算门控 (2026-10-01 19:10 事故) =====
+    # 游戏规则: "退出后将无法领取本次道馆突破奖励" —— 道馆攻破结算页出现之前主动退出道馆,
+    # 本次突破一分奖励都没有; 结算页出现之后再退出(哪怕是主动点退出)奖励照发。
+    # 2026-10-01 的现场:
+    #   19:10:34 oas1 打完一个结界, quit_battle 在"已经回到寮境"的画面上继续点左上角退出按钮
+    #            (寮境里这个箭头是"退出道馆"), 弹出"退出后将无法领取..."确认框; 因为弹窗挡着
+    #            右下角"挑战"按钮, 场景判定成 Ryou_Dokan_Scene_Start_Challenge, 脚本对着被挡住的
+    #            按钮连点 11 次 -> GameTooManyClickError -> 误判卡死重启游戏
+    #            (现场帧 log/error/1790853050656/2026-10-01_19-10-50-605245.png)
+    #   19:15:39 / 19:19:18 oas1/oas2 收尾 goto_main 时点了确认框的"确认" -> 直接放弃本次奖励;
+    #            当时"剩余突破时间"还有 10 分钟、对面还剩 46 人, 道馆根本没结算
+    # 因此: 只要还没见过结算页(道馆胜利/夺得资金), 就绝不确认退出, 改成点"取消"并留在道馆里
+    #       等结算(自己次数打完也一样), 直到结算页出现或道馆活动时间(剩余突破时间+宽限)走完。
+    dokan_joined: bool = False
+    dokan_settled: bool = False
+    _remain_count_updated: bool = False
+    _settled_page_clicks: int = 0
+    _settlement_deadline = None
+    _settlement_wait_start = None
+    _settlement_wait_last_log = None
+    _exit_cancel_clicks: int = 0
+    # 点"取消"的次数上限(同一个按钮点满 10 次会被 OAS 判成连点并重启游戏)
+    EXIT_CANCEL_MAX: int = 3
+    # 结算页出现后最多再点几次空白就交给 goto_main 收尾, 避免在结算页上原地打转
+    SETTLEMENT_PAGE_MAX_CLICK: int = 6
+    # "剩余突破时间"归零后, 馆主战/结算动画的宽限时间
+    SETTLEMENT_GRACE = timedelta(minutes=6)
+    # 等结算的硬上限(道馆活动总时长: 召集+突破20分钟+结算)
+    SETTLEMENT_WAIT_MAX = timedelta(minutes=30)
+
     # "确认退出集结场景吗?" 弹窗的确认按钮位置固定(实测 x 674~808, y 384~448, 中心约 741,416)。
     # 2026-09-30 的失败经过: 该弹窗在当前客户端(2.8.78)下渲染得极暗(面板亮度仅 13/255,
     # 按钮区域与 I_RYOU_DOKAN_EXIT_ENSURE 的匹配度只有 0.04), 图像素材认不出来; 而
@@ -62,6 +92,19 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
     C_DOKAN_QUIT_DIALOG_ENSURE = RuleClick(
         roi_front=(711, 402, 60, 28), roi_back=(711, 402, 60, 28),
         name="dokan_quit_dialog_ensure")
+    # 3) "退出后将无法领取本次道馆突破奖励，确认退出？"弹窗的"取消"按钮
+    #    2026-10-01 19:10 现场帧实测(log/error/1790853050656/2026-10-01_19-10-50-605245.png):
+    #      确认按钮 x674~808 y384~448, I_RYOU_DOKAN_EXIT_ENSURE 匹配 0.9997(能认出来)
+    #      取消按钮 x468~604 y396~452(红色), 与确认素材互匹配只有 0.59/0.68, 不会互相误判
+    #    这个弹窗一旦点"确认"就是放弃本次道馆突破奖励, 所以默认只点"取消"。
+    C_DOKAN_EXIT_CANCEL = RuleClick(
+        roi_front=(468, 396, 136, 56), roi_back=(468, 396, 136, 56),
+        name="dokan_exit_cancel")
+    # 4) 寮境顶部"剩余突破时间 mm:ss": 用来判断道馆活动还剩多久(等结算的截止时刻)
+    #    同一张现场帧实测 detect_and_ocr 在 x540~739 y77~104 命中 "剩余突破时间 14:38"(0.937)
+    O_DOKAN_ATTACK_REMAIN = RuleOcr(
+        roi=(490, 60, 320, 60), area=(490, 60, 320, 60),
+        mode="Full", method="Default", keyword="", name="dokan_attack_remain")
 
     @cached_property
     def _attack_priorities(self) -> list:
@@ -121,12 +164,20 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
             # 检测当前界面的场景（时间关系，暂时没有做庭院、町中等主界面的场景检测, 应考虑在GameUI.game_ui.ui_get_current_page()里实现）
             in_dokan, current_scene = self.get_current_scene(True)
             logger.info(f"in_dokan={in_dokan}, current_scene={current_scene}")
+            self.note_scene(current_scene)
 
             # 检测到不在道馆场景, 则等待2秒再继续循环
             if not in_dokan:
                 if not out_dokan_timer.started():
                     out_dokan_timer.start()
                 if out_dokan_timer.reached():
+                    # 一直认不出场景, 但"退出道馆"确认框还在 -> 人其实还在道馆里(只是画面没认出来),
+                    # 这时候退出=放弃奖励, 先把弹窗取消掉再继续看
+                    if self.appear(self.I_RYOU_DOKAN_EXIT_ENSURE):
+                        self.cancel_exit_dokan()
+                        out_dokan_timer.clear()
+                        sleep(2)
+                        continue
                     logger.warning("long hours away from dokan,exit")
                     break
                 logger.info("out of dokan scene,wait for 2 seconds")
@@ -134,12 +185,39 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
                 continue
             out_dokan_timer.clear()
 
+            # 退出道馆确认弹窗("退出后将无法领取本次道馆突破奖励, 确认退出?"): 永远不主动确认。
+            # 这个弹窗还盖住右下角"挑战"按钮, 交给下面的场景分支处理会被判成"挑战可用"然后
+            # 对着被挡住的按钮连点 -> GameTooManyClickError (2026-10-01 19:10 的报错)。
+            # NOTE 只在"人在道馆里"的场景下处理: 道馆地图上的"挑战/刷新确认"弹窗用的是同款按钮
+            #      素材(I_REFRESH_ENSURE 与 I_RYOU_DOKAN_EXIT_ENSURE 互匹配 1.0, 实测),
+            #      那些弹窗和结算奖励无关, 不该被这里点掉; 结算场景自己会处理弹窗。
+            if (current_scene in self.DOKAN_INSIDE_SCENES
+                    and current_scene not in (DokanScene.RYOU_DOKAN_SCENE_WIN,
+                                              DokanScene.RYOU_DOKAN_SCENE_BATTLE_OVER)
+                    and self.appear(self.I_RYOU_DOKAN_EXIT_ENSURE)):
+                if self.exit_allowed():
+                    logger.info("dokan: settlement done, this exit dialog is safe to confirm")
+                else:
+                    self.cancel_exit_dokan()
+                continue
+
             # 战斗结束
             if (current_scene == DokanScene.RYOU_DOKAN_SCENE_BATTLE_OVER or
                     current_scene == DokanScene.RYOU_DOKAN_SCENE_WIN):
+                if (current_scene == DokanScene.RYOU_DOKAN_SCENE_WIN
+                        and not self.dokan_settled):
+                    # 道馆胜利/夺得资金: 本次突破的结算页出现了, 之后再退出不会丢奖励
+                    self.dokan_settled = True
+                    logger.info("dokan: settlement page appeared, the reward is safe from now on")
                 # 随便点击个地方退出奖励界面
                 self.click(self.C_DOKAN_TOPPA_RANK_CLOSE_AREA, interval=2)
+                self._settled_page_clicks += 1
                 sleep(2)
+                if (self.dokan_settled
+                        and self._settled_page_clicks >= self.SETTLEMENT_PAGE_MAX_CLICK):
+                    # 结算页点了半天还没走: 不再原地打转, 交给收尾的 goto_main 退出道馆
+                    logger.warning("dokan: settlement page still on screen, leave it to goto_main")
+                    break
                 continue
             # 道馆结束弹窗 突破排名
             if current_scene == DokanScene.RYOU_DOKAN_SCENE_TOPPA_RANK:
@@ -307,13 +385,24 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
                     if self.appear(self.I_RYOU_DOKAN_FAILED_VOTE_KEEP_BOUNTY):
                         logger.info("Dokan challenge failed: vote for keep the awards")
                         self.ui_click_until_disappear(self.I_RYOU_DOKAN_FAILED_VOTE_KEEP_BOUNTY)
+                    # 保留赏金 = 本次道馆的奖励已经按游戏规则结清, 之后退出道馆不会丢奖励
+                    self.dokan_settled = True
                 continue
-            # 场景状态：道馆已经结束
+            # 场景状态：道馆已经结束(寮境里已经没有"挑战"按钮了)
             if current_scene == DokanScene.RYOU_DOKAN_SCENE_FINISHED:
+                if not self._remain_count_updated:
+                    self._remain_count_updated = True
+                    # 更新配置
+                    self.update_remain_attack_count()
+                # NOTE 2026-10-01: "今日可挑战机会 0次 / 挑战成功" 只说明自己的挑战次数用完了,
+                #      不等于道馆已经结算(19:15 那次还剩 10 分钟突破时间、对面还有 46 人)。
+                #      这时候退出道馆就是弹"退出后将无法领取本次道馆突破奖励"的那个操作,
+                #      确认了就一分奖励都没有 -> 结算页出现之前一律留在道馆里等。
+                if not self.exit_allowed():
+                    self.wait_settlement_tick()
+                    sleep(2)
+                    continue
                 logger.info("Dokan challenge finished, exit Dokan")
-                # 更新配置
-                self.update_remain_attack_count()
-
                 break
 
             logger.info(f"scene Without handler, skipped")
@@ -530,6 +619,9 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
         #          10 次后把自己点成 GameTooManyClickError(见 2026-09-30 19:22 的日志);
         #        - 若误报被修掉, 又会变成一直空转。
         #      因此: 有限次重试 + 长时间没进展时按坐标兜底点弹窗的"确认"按钮。
+        # NOTE 2026-10-01 追加: "退出后将无法领取本次道馆突破奖励, 确认退出?" 里的"确认"
+        #      就是放弃本次道馆奖励。只有结算页出现过(或者道馆活动时间早就走完)才允许点它;
+        #      否则点"取消"并放弃这次收尾 —— 宁可停在道馆里, 也不能把奖励丢在这。
         idle_round = 0
         max_idle_round = 5
         fallback_used = 0
@@ -537,8 +629,12 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
             self.screenshot()
             if self.appear(self.I_CHECK_MAIN):
                 return True
-            # "确认退出集结场景吗?" 弹窗: 有专用素材且 ROI 就是按钮位置, 直接点掉
+            # "确认退出集结场景吗?" / "退出后将无法领取...确认退出?" 弹窗: ROI 就是确认按钮位置
             if self.appear(self.I_RYOU_DOKAN_EXIT_ENSURE):
+                if not self.exit_allowed():
+                    self.cancel_exit_dokan()
+                    logger.warning("dokan: not settled yet, keep staying inside the dokan")
+                    return False
                 self.ui_click_until_disappear(self.I_RYOU_DOKAN_EXIT_ENSURE, interval=2)
                 idle_round = 0
                 continue
@@ -550,6 +646,11 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
                 idle_round = 0
                 continue
             if self.appear(self.I_RYOU_DOKAN_DOKAN_QUIT):
+                # 寮境左上角这个箭头 = 退出道馆, 点了就会弹"退出后将无法领取本次道馆突破奖励"
+                if not self.exit_allowed():
+                    logger.warning("dokan: not settled yet, do not quit the dokan "
+                                   "(active exit would drop this dokan's reward)")
+                    return False
                 self.click(self.I_RYOU_DOKAN_DOKAN_QUIT, interval=3)
                 idle_round = 0
                 continue
@@ -565,6 +666,11 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
             idle_round += 1
             if idle_round <= max_idle_round:
                 continue
+            # 兜底是按坐标点"确认"按钮 —— 没结算时那等于放弃本次道馆奖励, 所以只在允许退出时兜底
+            if not self.exit_allowed():
+                logger.warning("dokan: goto main stuck while the dokan is not settled, give up "
+                               "(refuse to click the exit confirm that drops this reward)")
+                return False
             # 按固定坐标点弹窗的"确认"按钮, 最多试 2 次, 避免把同一个按钮点成 GameTooManyClickError
             if fallback_used >= 2:
                 logger.warning("dokan: goto main failed, give up")
@@ -884,9 +990,13 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
         """
         self.screenshot()
         count = -1
-        if self.appear(self.I_RYOU_DOKAN_REMAIN_ATTACK_COUNT_ZERO) or self.appear(
-                self.I_RYOU_DOKAN_REMAIN_ATTACK_COUNT_DONE):
-            logger.info("I_RYOU_DOKAN_REMAIN_ATTACK_COUNT_ZERO/DONE found")
+        if self.appear(self.I_RYOU_DOKAN_REMAIN_ATTACK_COUNT_ZERO):
+            logger.info("I_RYOU_DOKAN_REMAIN_ATTACK_COUNT_ZERO found")
+            count = 0
+        elif self.appear(self.I_RYOU_DOKAN_REMAIN_ATTACK_COUNT_DONE):
+            # NOTE 2026-10-01: 这个"挑战成功"文案只代表自己的挑战次数用完, 不代表道馆已结算,
+            #      所以这里单独打一行日志, 好和 ZERO 区分开(现场判断等结算的时机用得上)
+            logger.info("I_RYOU_DOKAN_REMAIN_ATTACK_COUNT_DONE found")
             count = 0
         elif self.appear(self.I_RYOU_DOKAN_REMAIN_ATTACK_COUNT_ONE):
             logger.info("I_RYOU_DOKAN_REMAIN_ATTACK_COUNT_ONE found")
@@ -900,6 +1010,109 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
         self.config.dokan.attack_count_config.set_attack_count(count, self.config.save)
         return count
 
+    # 已经进入某个道馆(寮境/战斗)之后才算"人在道馆里": 此时退出=放弃本次结算奖励。
+    # 只在道馆地图上找馆(Finding/Found Dokan)不算, 那时退出没有奖励可丢。
+    DOKAN_INSIDE_SCENES = frozenset({
+        DokanScene.RYOU_DOKAN_SCENE_GATHERING,
+        DokanScene.RYOU_DOKAN_SCENE_IN_FIELD,
+        DokanScene.RYOU_DOKAN_SCENE_START_CHALLENGE,
+        DokanScene.RYOU_DOKAN_SCENE_CD,
+        DokanScene.RYOU_DOKAN_SCENE_FIGHTING,
+        DokanScene.RYOU_DOKAN_SCENE_BATTLE_MASTER_FIRST,
+        DokanScene.RYOU_DOKAN_SCENE_BATTLE_MASTER_SECOND,
+        DokanScene.RYOU_DOKAN_SCENE_CHEERING,
+        DokanScene.RYOU_DOKAN_SCENE_ABANDON_VOTE,
+        DokanScene.RYOU_DOKAN_SCENE_FAILED_VOTE,
+        DokanScene.RYOU_DOKAN_SCENE_BATTLE_OVER,
+        DokanScene.RYOU_DOKAN_SCENE_BOSS_WAITING,
+        DokanScene.RYOU_DOKAN_SCENE_MASTER_BATTLING,
+        DokanScene.RYOU_DOKAN_SCENE_TOPPA_RANK,
+        DokanScene.RYOU_DOKAN_SCENE_WIN,
+        DokanScene.RYOU_DOKAN_SCENE_FINISHED,
+    })
+
+    def note_scene(self, scene: DokanScene) -> None:
+        """记录"人在道馆里"状态(退出会丢奖励的前提)"""
+        if scene in self.DOKAN_INSIDE_SCENES:
+            self.dokan_joined = True
+
+    def exit_allowed(self) -> bool:
+        """现在退出道馆会不会丢本次突破奖励
+
+        结算页(道馆胜利/夺得资金)出现过 -> 可以退; 活动时间早就走完(等结算超时) -> 也可以退;
+        否则一律不准主动退出(退出=放弃奖励)。
+        """
+        if not self.dokan_joined or self.dokan_settled:
+            return True
+        if self._settlement_deadline is not None and datetime.now() >= self._settlement_deadline:
+            return True
+        return False
+
+    def cancel_exit_dokan(self) -> bool:
+        """点掉"退出后将无法领取本次道馆突破奖励, 确认退出?"弹窗的"取消", 保住奖励
+
+        同一个按钮点满 10 次会触发 OAS 的连点保护(GameTooManyClickError -> 重启游戏),
+        所以这里限次: 点到第 EXIT_CANCEL_MAX 次还没把弹窗关掉就停手, 让上层去做决定。
+        """
+        self._exit_cancel_clicks += 1
+        if self._exit_cancel_clicks > self.EXIT_CANCEL_MAX:
+            logger.warning(f"dokan: already clicked CANCEL {self.EXIT_CANCEL_MAX} times, "
+                           f"stop clicking (the dialog may not be where we think it is)")
+            return False
+        logger.warning("dokan: exit-without-reward dialog -> click CANCEL to keep this reward")
+        self.click(self.C_DOKAN_EXIT_CANCEL, interval=1)
+        return True
+
+    def dokan_remain_seconds(self):
+        """寮境顶部"剩余突破时间 mm:ss" 还剩多少秒; 认不出来返回 None"""
+        text = self.O_DOKAN_ATTACK_REMAIN.detect_text(self.device.image)
+        match = re.search(r'(\d{1,2})\s*[:：]\s*(\d{2})', (text or '').replace(' ', ''))
+        if not match:
+            return None
+        return int(match.group(1)) * 60 + int(match.group(2))
+
+    def wait_settlement_tick(self) -> None:
+        """留在道馆里等结算页: 第一次按"剩余突破时间"定截止时刻, 之后每 30 秒心跳一次并校正
+
+        截止时刻 = 剩余突破时间 + SETTLEMENT_GRACE(馆主战/结算动画),
+        认不出倒计时就退回 SETTLEMENT_WAIT_MAX; 总等待时间再被 SETTLEMENT_WAIT_MAX 兜住。
+        """
+        now = datetime.now()
+        if self._settlement_wait_start is None:
+            self._settlement_wait_start = now
+            self._settlement_deadline = now + self.SETTLEMENT_WAIT_MAX
+        hard_deadline = self._settlement_wait_start + self.SETTLEMENT_WAIT_MAX
+        if self._settlement_wait_last_log is None:
+            remain = self.dokan_remain_seconds()
+            if remain is None:
+                logger.info(f"dokan: settlement page not seen yet, no countdown found, "
+                            f"stay inside until {self._settlement_deadline:%H:%M:%S}")
+            else:
+                self._settlement_deadline = min(now + timedelta(seconds=remain)
+                                                + self.SETTLEMENT_GRACE, hard_deadline)
+                logger.info(f"dokan: settlement page not seen yet, 剩余突破时间 {remain}s, "
+                            f"stay inside until {self._settlement_deadline:%H:%M:%S} "
+                            f"(exiting now would drop this dokan's reward)")
+            self._settlement_wait_last_log = now
+            return
+        if (now - self._settlement_wait_last_log).total_seconds() < 30:
+            return
+        self._settlement_wait_last_log = now
+        remain = self.dokan_remain_seconds()
+        if remain is not None:
+            deadline = min(now + timedelta(seconds=remain) + self.SETTLEMENT_GRACE, hard_deadline)
+            if deadline > self._settlement_deadline:
+                self._settlement_deadline = deadline
+        # 认不出倒计时的时候, 截止时刻也要被硬上限压住, 否则会一直等下去
+        self._settlement_deadline = min(self._settlement_deadline, hard_deadline)
+        if self.exit_allowed():
+            logger.warning("dokan: waited for the settlement page until "
+                           f"{self._settlement_deadline:%H:%M:%S}, give up waiting")
+        else:
+            logger.info(f"dokan: still waiting for the settlement page, "
+                        f"remain={remain if remain is not None else '?'}s, "
+                        f"until {self._settlement_deadline:%H:%M:%S}")
+
     def quit_battle(self):
         """
             尝试退出战斗界面
@@ -912,9 +1125,20 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
             综上,点击左上角退出按钮区域
         """
         logger.info("try to quit battle...")
-        while True:
+        for _ in range(6):
             self.screenshot()
             if self.appear(self.I_RYOU_DOKAN_CENTER_TOP):
+                break
+            # "退出后将无法领取本次道馆突破奖励, 确认退出?" —— 先于下面那个全屏素材判断:
+            # 两者的"确认"按钮是同一张图(实测全屏素材在退出道馆弹窗上 0.9999), 顺序反了就会点错
+            if self.appear(self.I_RYOU_DOKAN_EXIT_ENSURE):
+                self.cancel_exit_dokan()
+                break
+            # 战斗已经结算完、人已经回到寮境(集结)界面时, 左上角这个箭头是"退出道馆"而不是
+            # "退出战斗", 再点下去就是放弃本次道馆奖励(2026-10-01 19:10 就是这么点出来的弹窗)。
+            # 所以看到寮境的元素(右下角挑战/集结标题)就直接停手。
+            if self.appear(self.I_RYOU_DOKAN_START_CHALLENGE) or self.appear(self.I_RYOU_DOKAN_GATHERING):
+                logger.info("dokan: already back to the dokan scene, stop quitting battle")
                 break
             if self.appear(self.I_RYOU_DOKAN_QUIT_BATTLE_ENSURE):
                 self.ui_click_until_disappear(self.I_RYOU_DOKAN_QUIT_BATTLE_ENSURE)
@@ -928,6 +1152,8 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
                 self.click(self.C_DOKAN_BATTLE_QUIT_AREA, interval=3)
                 continue
             self.wait_until_appear(self.I_RYOU_DOKAN_CENTER_TOP, True, 3)
+        else:
+            logger.warning("dokan: quit battle retried too many times, give up")
 
     def abandoned_toppa(self):
         if self.appear(self.I_DOKAN_ABANDONED_TOPPA):
@@ -951,6 +1177,8 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
             # 保留赏金
             if self.appear(self.I_RYOU_DOKAN_FAILED_VOTE_KEEP_BOUNTY):
                 self.ui_click_until_disappear(self.I_RYOU_DOKAN_FAILED_VOTE_KEEP_BOUNTY)
+        # 主动放弃突破/投票保留赏金之后, 本次道馆的奖励已经按游戏规则结清, 可以正常退出道馆了
+        self.dokan_settled = True
 
     def switch_soul_in_dokan(self):
         if self.switch_soul_done:
@@ -1120,6 +1348,8 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
                 # 如果出现打败馆主的赢，就点击
                 if self.appear(self.I_RYOU_DOKAN_WIN):
                     logger.info("We've defeated the boss, and win the final game.")
+                    # 馆主打完 = 道馆攻破, 结算页就在眼前, 之后再退出道馆不会丢奖励
+                    self.dokan_settled = True
                     win = True
                     return win, True
 
