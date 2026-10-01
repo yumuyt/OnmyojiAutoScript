@@ -154,27 +154,6 @@ class BaseTask(GlobalGameAssets, CostumeBase):
         """
         return hasattr(self.device, 'image') and self.device.image is not None
 
-    def interval_gate(self, name: str, interval: float) -> bool:
-        """
-        匹配/点击的节流闸门: 同一个 name 在 interval 秒内只放行一次
-
-        注意: 这里只更新已有计时器的 limit, **不重建 Timer**。
-        重建会把 _current 归零, 而 reached() 判断的是 time.time() - _current > limit,
-        于是新建的计时器立刻就算"到时间了", 节流当场失效。
-        调用方传固定 interval 时两种写法等价, 但传随机 interval
-        (例如 `interval=random.uniform(0.7, 1.4)`) 时就只有现在这种写法能真正节流。
-        :param name: 目标的名字(interval_timer 的 key)
-        :param interval: 节流间隔, 单位秒
-        :return: True: 间隔已到, 放行; False: 还在间隔内, 拦下
-        """
-        timer = self.interval_timer.get(name)
-        if timer is None:
-            self.interval_timer[name] = Timer(interval)
-            return self.interval_timer[name].reached()
-        if timer.limit != interval:
-            timer.limit = interval
-        return timer.reached()
-
     def appear(self,
                target: RuleImage | RuleGif | RuleOcr,
                interval: float = None,
@@ -186,8 +165,14 @@ class BaseTask(GlobalGameAssets, CostumeBase):
         :param threshold:
         :return: interval时间到达且匹配成功则返回True, 否则False
         """
-        if interval and not self.interval_gate(target.name, interval):
-            return False
+        if interval:
+            if target.name in self.interval_timer:
+                if self.interval_timer[target.name].limit != interval:
+                    self.interval_timer[target.name] = Timer(interval)
+            else:
+                self.interval_timer[target.name] = Timer(interval)
+            if not self.interval_timer[target.name].reached():
+                return False
         if isinstance(target, RuleOcr):
             appear = self.ocr_appear(target, interval)
         else:
@@ -504,9 +489,17 @@ class BaseTask(GlobalGameAssets, CostumeBase):
         if not click:
             return False
 
-        # 如果时间还没到达，则不执行
-        if interval and not self.interval_gate(click.name, interval):
-            return False
+        if interval:
+            if click.name in self.interval_timer:
+                # 如果传入的限制时间不一样，则替换限制新的传入的时间
+                if self.interval_timer[click.name].limit != interval:
+                    self.interval_timer[click.name] = Timer(interval)
+            else:
+                # 如果没有限制时间，则创建限制时间
+                self.interval_timer[click.name] = Timer(interval)
+            # 如果时间还没到达，则不执行
+            if not self.interval_timer[click.name].reached():
+                return False
 
         x, y = click.coord()
         if isinstance(click, RuleLongClick):
@@ -532,9 +525,17 @@ class BaseTask(GlobalGameAssets, CostumeBase):
         if not isinstance(target, RuleOcr):
             return None
 
-        # 如果时间还没到达，则不执行
-        if interval and not self.interval_gate(target.name, interval):
-            return None
+        if interval:
+            if target.name in self.interval_timer:
+                # 如果传入的限制时间不一样，则替换限制新的传入的时间
+                if self.interval_timer[target.name].limit != interval:
+                    self.interval_timer[target.name] = Timer(interval)
+            else:
+                # 如果没有限制时间，则创建限制时间
+                self.interval_timer[target.name] = Timer(interval)
+            # 如果时间还没到达，则不执行
+            if not self.interval_timer[target.name].reached():
+                return None
 
         result = target.ocr(self.device.image, exact=exact)
         appear = False
