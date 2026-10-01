@@ -19,6 +19,17 @@ from tasks.CollectiveMissions.assets import CollectiveMissionsAssets
 
 
 class MC(str, Enum):
+    """
+    任务卡上的任务类型。
+
+    卡片标题 = "<自定义任务名>·<任务类型>"，左侧那张自定义任务卡写作 "远远不够·养成"：
+      * '·' 右边才是**任务类型**（养成 / 觉醒一 / 御魂三 / 契灵探查 …），唯一可靠的判据；
+      * '·' 左边是寮管理自己起的名字（本机是 "远远不够"），可以是任何文字，不能当判据。
+
+    旧实现拿 '·' 左边那半截当判据（result_1 == '远远不够' 就当成喂 N 卡），于是
+    "远远不够·御魂三" 被误判成 MC.FEED，_feed 去点左侧卡片的「提交」按钮连点 10 次
+    → GameTooManyClickError → 游戏重启（2026-10-01 22:30 oas2 现场）。
+    """
     BL = '契灵'
     AW1 = '觉醒一'
     AW2 = '觉醒二'
@@ -28,9 +39,10 @@ class MC(str, Enum):
     GR3 = '御灵三'
     SO1 = '御魂一'
     SO2 = '御魂二'
+    SO3 = '御魂三'
     FRIEND = '结伴同行'
     UNKNOWN = '未知'
-    FEED = '远远不够'  # 喂N卡
+    FEED = '养成'  # 喂 N 卡（旧配置里这个类型写成 "远远不够"，见 MissionsConfig）
 
 class ScriptTask(GameUi, CollectiveMissionsAssets):
     missions: list = []  # 用于记录三个的任务的种类
@@ -38,10 +50,17 @@ class ScriptTask(GameUi, CollectiveMissionsAssets):
     @cached_property
     def rule(self) -> list:
         rule = self.config.collective_missions.missions_config.missions_rule
+        # 旧写法兜底：喂 N 卡任务以前写作 "远远不够"（那是左侧自定义任务名，不是类型名）。
+        # 正常情况 Config 加载时 MissionsConfig.mr_validator 已经换掉了，这里再兜一次，
+        # 免得"进程没重启、配置模型还是老的"时把 养成 当成不认识的写法丢掉。
+        rule = rule.replace('远远不够', MC.FEED.value)
         rule = rule.replace(' ', '').replace('\n', '')
         # 正则表达式 分离 ">"
         rule = re.split(r'>', rule)
         mc_values_list = [member.value for member in MC]
+        unknown = [item for item in rule if item and item not in mc_values_list]
+        if unknown:
+            logger.warning(f'missions_rule 里这些写法不是任务类型，已忽略: {unknown}')
         rule = [item for item in rule if item in mc_values_list]
         return rule
 
@@ -84,7 +103,7 @@ class ScriptTask(GameUi, CollectiveMissionsAssets):
                 or mission == MC.GR1 or mission == MC.GR2 or mission == MC.GR3:
             # 其他就捐材料
             self._donate(index)
-        elif mission == MC.SO1 or mission == MC.SO2:
+        elif mission in (MC.SO1, MC.SO2, MC.SO3):
             # 御魂就捐御魂
             self._soul(index)
 
@@ -105,6 +124,33 @@ class ScriptTask(GameUi, CollectiveMissionsAssets):
         raise TaskEnd('CollectiveMissions')
 
 
+    def read_card(self, ocr_1: RuleOcr, ocr_2: RuleOcr) -> str:
+        """
+        读一张任务卡的标题，并把分隔符 '·' 去掉（例如 "远远不够·养成" → "远远不够养成"）。
+
+        每张卡片的标题各占两个 OCR 区域：前一个盖住 '·' 左边，后一个盖住右边。
+        左边那半截是自定义任务名，右边那半截才是任务类型。
+        :return: 标题全文（已去掉 '·' 和空格）
+        """
+        self.screenshot()
+        result_1 = ocr_1.ocr(self.device.image)
+        result_2 = ocr_2.ocr(self.device.image)
+        return (result_1 + result_2).replace('·', '').replace(' ', '')
+
+    @staticmethod
+    def classify(name: str) -> MC:
+        """
+        把卡片标题文本翻译成任务类型。
+
+        只认类型名（养成 / 觉醒一 / 御魂三 / 契灵探查 / 结伴同行 …），
+        这些类型名在标题里的位置不受自定义任务名影响，所以左右两半可以一起判。
+        """
+        for member in (MC.FRIEND, MC.BL, MC.FEED, MC.AW1, MC.AW2, MC.AW3,
+                       MC.GR1, MC.GR2, MC.GR3, MC.SO1, MC.SO2, MC.SO3):
+            if member.value in name:
+                return member
+        return MC.UNKNOWN
+
     def detect_one(self, ocr_1: RuleOcr, ocr_2: RuleOcr) -> MC:
         """
         检测某一个位置是什么的任务
@@ -112,54 +158,29 @@ class ScriptTask(GameUi, CollectiveMissionsAssets):
         :param ocr_2:
         :return:
         """
-        self.screenshot()
-        result_1 = ocr_1.ocr(self.device.image)
-        result_2 = ocr_2.ocr(self.device.image)
-        result_1 = result_1.replace('·', '')
-        if result_1 == '结伴同行':
-            return MC.FRIEND
-        elif result_1 == '契灵探查':
-            return MC.BL
-        if result_2 == '觉醒一':
-            return MC.AW1
-        elif result_2 == '觉醒二':
-            return MC.AW2
-        elif result_2 == '觉醒三':
-            return MC.AW3
-        elif result_2 == '御灵一':
-            return MC.GR1
-        elif result_2 == '御灵二':
-            return MC.GR2
-        elif result_2 == '御灵三':
-            return MC.GR3
-        elif result_2 == '御魂一':
-            return MC.SO1
-        elif result_2 == '御魂二':
-            return MC.SO2
-        if result_1 == '远远不够':
-            logger.warning(f'Ocr task name: {result_1}')
-            return MC.FEED
-        return MC.UNKNOWN
+        return self.classify(self.read_card(ocr_1, ocr_2))
 
     def detect_best(self) -> tuple:
         """
-        自动寻找最好的任务并返回，期间记录三个任务的类型
-        :return: 任务类型, 0/1/2
+        在 missions_rule 里挑优先级最高、而且当前三张卡片上真的存在的任务。
+
+        missions_rule 是**白名单 + 优先级**：没写进去的类型不会做（左侧自定义任务
+        刷新出来的类型也一样），所以想做什么就往里加。
+        :return: 任务类型, 0/1/2；三个类型都不在 missions_rule 里时返回 (MC.UNKNOWN, 0)
         """
-        first_class = self.detect_one(self.O_CM_1, self.O_CM_2)
-        second_class = self.detect_one(self.O_CM_3, self.O_CM_4)
-        third_class = self.detect_one(self.O_CM_5, self.O_CM_6)
-        first_order = self.rule.index(first_class) if first_class in self.rule else 100
-        second_order = self.rule.index(second_class) if second_class in self.rule else 101
-        third_order = self.rule.index(third_class) if third_class in self.rule else 102
-        logger.info(f'first_class: {first_class}, second_class: {second_class}, third_class: {third_class}')
-        logger.info(f'first_order: {first_order}, second_order: {second_order}, third_order: {third_order}')
-        if first_order < second_order and first_order < third_order:
-            best_index, best_class = 0, first_class
-        elif second_order < first_order and second_order < third_order:
-            best_index, best_class = 1, second_class
-        elif third_order < first_order and third_order < second_order:
-            best_index, best_class = 2, third_class
+        classes = [self.detect_one(self.O_CM_1, self.O_CM_2),
+                   self.detect_one(self.O_CM_3, self.O_CM_4),
+                   self.detect_one(self.O_CM_5, self.O_CM_6)]
+        logger.info(f'missions: {[c.value for c in classes]}')
+        logger.info(f'missions_rule: {self.rule}')
+
+        # (优先级, 卡片位置, 任务类型)，按优先级取最小的那个
+        candidates = [(self.rule.index(c), i, c) for i, c in enumerate(classes) if c in self.rule]
+        if not candidates:
+            logger.warning('三张卡片的类型都不在 missions_rule 里，本次不做任务')
+            return MC.UNKNOWN, 0
+        order, best_index, best_class = min(candidates, key=lambda item: item[0])
+        logger.info(f'Best mission is {best_class.value} (order={order}, index={best_index})')
         return best_class, best_index
 
 
@@ -328,23 +349,32 @@ class ScriptTask(GameUi, CollectiveMissionsAssets):
 
     def select_mission(self, missions_select: str) -> bool:
         """
-        尝试在当前界面中识别并选择指定名称的好友
-        :param friend_name: 要选择的好友名称
-        :return: 成功选择返回True
+        点「切换任务」把左侧的自定义任务刷新成指定的任务。
+
+        :param missions_select: 配置里填的任务名。填类型名（"养成"、"御魂二"）
+                                或者卡片上的全名（"远远不够·养成"）都能认出来 ——
+                                按 '·' 右边的类型名来判，不需要照抄自定义任务名。
+        :return: 换到了返回 True；填的名字认不出来、或者点了 20 次还没换到，返回 False
         """
+        expect = self.classify(missions_select)
+        if expect == MC.UNKNOWN:
+            logger.warning(f'missions_select="{missions_select}" 认不出任务类型，'
+                           f'本次不切换，直接按 missions_rule 选任务'
+                           f'（喂 N 卡请填 "养成"）')
+            return False
+
         click_cnt = 0
         while 1:
-            self.screenshot()
-            # 识别当前任务
-            missions = self.detect_one(self.O_CM_1, self.O_CM_2)
-            logger.info(f"当前任务: {missions}")
-            logger.info(f"目标任务: {missions_select}")
+            name = self.read_card(self.O_CM_1, self.O_CM_2)
+            missions = self.classify(name)
+            logger.info(f"当前任务: {name}（{missions.value}）")
+            logger.info(f"目标任务: {missions_select}（{expect.value}）")
 
-            if missions == missions_select:
+            if missions == expect:
                 logger.info(f"成功切换任务")
                 return True
             if click_cnt > 20:
-                logger.warning(f'click_cnt={click_cnt}')
+                logger.warning(f'click_cnt={click_cnt}，没换到 {expect.value}')
                 return False
             if not (self.I_CM_SWITCH.match_brightness(self.device.image) and
                 self.I_CM_SWITCH.match_brightness(self.device.image) and
@@ -441,7 +471,7 @@ class ScriptTask(GameUi, CollectiveMissionsAssets):
         logger.info('Finish to feed soul')
         # 领奖。
         #
-        # 「远远不够」提交 N 卡后奖励是**自动发放**的：可能一次弹窗都没有（直接回到任务列表），
+        # 「养成」（卡片标题 "远远不够·养成"）提交 N 卡后奖励是**自动发放**的：可能一次弹窗都没有（直接回到任务列表），
         # 也可能只弹一次（前 10 次的双倍额度已被别的任务用掉时）。
         # 原实现以「领够 2 次」为唯一出口，遇到这两种情况就会一直空转，直到设备 stuck
         # 检测(60s)抛 GameStuckError —— 表现就是"提交完就呆在那里"。
