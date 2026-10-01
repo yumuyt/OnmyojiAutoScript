@@ -25,6 +25,43 @@ class GeneralBattle(BattleWait, GeneralBuff):
     使用这个通用的战斗必须要求这个任务的config有config_general_battle
     """
 
+    # —— 准备阶段("准备"按钮)的参数 ——
+    # 点一次"准备"之后必须先等游戏反应, 不能连点: 既不像人, 也会撞上 device 的连点保护
+    PREPARE_CLICK_INTERVAL = (1.0, 1.6)  # 两次"准备"之间的随机间隔(秒)
+    PREPARE_CLICK_LIMIT = 6  # 单场战斗最多补点几次(连点保护: 同一按钮 10 次 / 最近 15 次点击)
+    PREPARE_CLICK_WAIT = 25  # 准备阶段的补点总预算(秒)
+
+    _prepare_click_count = 0  # 本场战斗已经点了几次"准备"，类属性只作默认值
+    _prepare_next_click = 0.0  # 下一次允许点"准备"的时间戳
+
+    def prepare_click_reset(self):
+        """重置"准备"点击预算，每次进入一场战斗时调用"""
+        self._prepare_click_count = 0
+        self._prepare_next_click = 0.0
+
+    def press_prepare(self) -> bool:
+        """
+        按一次"准备": 按钮亮着才按，落点仍是 RuleImage.coord() 的正态随机点，
+        两次点击之间随机间隔，单场有次数上限(超了就只等不点，免得触发连点保护)。
+
+        背景: 2026-10-01 06:26 / 06:29 两次 GameStuckError 都是"点了一次准备、
+        游戏在过场动画里把这次输入丢掉、之后没人再点"导致的。
+        :return: 本次是否按下
+        """
+        if self._prepare_click_count >= self.PREPARE_CLICK_LIMIT:
+            return False
+        if time.time() < self._prepare_next_click:
+            return False
+        if not self.appear(self.I_PREPARE_HIGHLIGHT):
+            return False
+        # 先把节奏占住, 免得 appear/click 的耗时让间隔越漂越长
+        self._prepare_next_click = time.time() + random.uniform(*self.PREPARE_CLICK_INTERVAL)
+        x, y = self.I_PREPARE_HIGHLIGHT.coord()
+        self.device.click(x, y, control_name=self.I_PREPARE_HIGHLIGHT.name)
+        self._prepare_click_count += 1
+        logger.info(f'Press prepare ({self._prepare_click_count}/{self.PREPARE_CLICK_LIMIT})')
+        return True
+
     def run_general_battle(self, config: GeneralBattleConfig = None, buff: BuffClass or list[BuffClass] = None) -> bool:
         """
         运行脚本
@@ -37,6 +74,8 @@ class GeneralBattle(BattleWait, GeneralBuff):
         # 战斗统计
         self.current_count += 1
         logger.info(f"Current count: {self.current_count}")
+        # 本场战斗的"准备"点击预算
+        self.prepare_click_reset()
         # 战前设置
         self.battle_before(buff, config)
         # 绿标
@@ -51,11 +90,16 @@ class GeneralBattle(BattleWait, GeneralBuff):
 
     def battle_before(self, buff: BuffClass | list[BuffClass], config: GeneralBattleConfig, timeout: float = 5) -> bool:
         """战斗前设置
-        :return: True:进入战斗或点击了准备按钮且识别不到准备按钮了 False:超过timeout s还没有进入战斗且没有点击过准备
+
+        切阵容/开加成的耗时不占用点"准备"的预算: 以前两者共用一个 5 秒计时器，
+        第一次战斗(current_count == 1)时切预设会吃掉将近 4 秒，只剩一次点"准备"的机会，
+        这一次被游戏吞掉就再也没人补点了。
+        :return: True: 已经进入正式战斗 False: 超时/放弃补点
         """
-        timeout_timer = Timer(timeout).start()
+        fallback_timer = Timer(timeout).start()  # 只兜底"既不是准备页也不是正式战斗"的异常画面
+        prepare_timer = Timer(self.PREPARE_CLICK_WAIT)  # 进了准备页才起表
         confed = False
-        while not timeout_timer.reached():
+        while 1:
             self.screenshot()
             if self.is_in_real_battle(False):  # 战斗阶段
                 return True
@@ -64,17 +108,36 @@ class GeneralBattle(BattleWait, GeneralBuff):
             if self.appear_then_click(self.I_CONFIRM_CLOSE_DIFF_SOUL, interval=0.6):  # 确认关闭御魂不一致提示
                 continue
             if self.is_in_prepare(False):  # 战斗准备阶段
+                if not prepare_timer.started():
+                    prepare_timer.start()
                 if not getattr(config, 'lock_team_enable', False):  # 没有锁定阵容
                     if self.current_count == 1 and not confed:  # 第一次战斗且是本次第一次配置
                         self.switch_preset_team(config.preset_enable, config.preset_group, config.preset_team)
                         self.check_and_open_buff(buff)
                         confed = True
-                    # 点击准备(锁定阵容自动点准备,不锁定阵容前面也已经配置完毕需要点准备)
-                    if self.appear_then_click(self.I_PREPARE_HIGHLIGHT, interval=0.8):
+                        # 预设面板收起需要时间, 这段时间点"准备"会被游戏吞掉。
+                        # 拟人也一样: 等面板消失、按钮亮起来再按。
+                        sleep(random.uniform(0.4, 0.9))
+                        prepare_timer.reset()  # 配置耗时不进准备预算, 从下一轮开始计时
                         continue
+                    if prepare_timer.reached() or self._prepare_click_count >= self.PREPARE_CLICK_LIMIT:
+                        logger.warning(f'准备点了 {self._prepare_click_count} 次仍未进入战斗'
+                                       f'({prepare_timer.current():.1f}s), 停止补点')
+                        return False
+                    # 点击准备(锁定阵容自动点准备,不锁定阵容前面也已经配置完毕需要点准备)
+                    if not self.press_prepare():
+                        sleep(random.uniform(0.3, 0.5))
+                    continue
+                # 锁定阵容: 游戏会自己点准备, 这里只等, 但也不能无限等
+                if prepare_timer.reached():
+                    logger.warning('锁定阵容下等待战斗开始超时')
+                    return False
+                sleep(random.uniform(0.3, 0.5))
                 continue
             # 未知界面, 既不是准备界面也不是战斗界面
             # logger.info('Wait for preparation page')  # 这玩意刷屏
+            if fallback_timer.reached():
+                return False
             sleep(random.uniform(0.4, 0.8))
         return False
 
@@ -348,10 +411,22 @@ class GeneralBattle(BattleWait, GeneralBuff):
                     logger.info("Green main")
 
             # 等待那个准备的消失
+            # 战斗没开起来时不能干等: 以前这里是死循环, 只能等 60 秒的卡死检测抛
+            # GameStuckError 然后重启整个游戏(2026-10-01 06:27 / 06:30 两次报错)。
+            # 现在像人一样按一次"准备", 按完给它反应时间, 有间隔也有上限。
+            wait_timer = Timer(self.PREPARE_CLICK_WAIT).start()
             while 1:
                 self.screenshot()
                 if not self.appear(self.I_PREPARE_HIGHLIGHT):
+                    self.prepare_click_reset()  # 准备页没了, 本场预算用完了
                     break
+                if wait_timer.reached() or self._prepare_click_count >= self.PREPARE_CLICK_LIMIT:
+                    # 补点预算用完还不开打: 继续等(交给 device 的卡死检测兜底重启),
+                    # 绝不能跳出去点绿标 —— 那是在准备页上乱点式神, 会把自己点成卡死
+                    sleep(random.uniform(0.4, 0.8))
+                    continue
+                if not self.press_prepare():
+                    sleep(random.uniform(0.3, 0.5))
 
             # 判断有无坐标的偏移
             self.appear_then_click(self.I_LOCAL)
