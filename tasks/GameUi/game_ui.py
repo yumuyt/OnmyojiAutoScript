@@ -37,6 +37,18 @@ class GameUi(BaseTask, GameUiAssets):
                 GameUiAssets.I_REALM_RAID_GOTO_EXPLORATION,
                 GameUiAssets.I_SIX_GATES_GOTO_EXPLORATION, SixRealmsAssets.I_EXIT_SIXREALMS,
                 ActivityShikigamiAssets.I_SKIP_BUTTON, ActivityShikigamiAssets.I_RED_EXIT, BaseTask.I_UI_BACK_BLUE]
+    # 模态确认弹窗: (识别用的标题素材, 弹窗上的"取消"或"关闭"素材)。顺序检查, 命中一个就收手。
+    # 与 ui_close 的区别: ui_close 是"看见就点它自己"(返回键/关闭叉), 这里需要两个素材都命中
+    # 才敢点 —— 弹窗上的按钮位置固定贴着弹窗, 单看按钮素材容易在别的地方误报。
+    ui_blocking_dialogs = [
+        (GameUiAssets.I_QUIT_GAME_DIALOG, GameUiAssets.I_QUIT_GAME_CANCEL),
+    ]
+    # 同一张弹窗的"取消"最短重试间隔。用独立计时器而不是 appear(interval=...):
+    # page_main.additional 里同一个素材用的是 0.6s 的 interval, 两个 limit 来回切会让
+    # BaseTask.appear 重建 Timer(重建出来的 Timer 立刻算 reached), 节流会失效 ——
+    # 而设备端同一个按钮点满 10 次就 GameTooManyClickError 重启游戏。
+    blocking_dialog_interval = 2.5
+    _blocking_dialog_timer = None
 
     def __init__(self, config, device):
         super().__init__(config, device)
@@ -93,6 +105,37 @@ class GameUi(BaseTask, GameUiAssets):
             skip_first_screenshot = False
         return False
 
+    def try_close_blocking_dialog(self, skip_first_screenshot: bool = True) -> bool:
+        """
+        尝试点掉压在画面上、让底下什么都点不动的模态确认弹窗, 点掉返回 True
+
+        2026-10-02 15:05 事故(log/error/1790924859236): 脚本 14:59 停在庭院等调度,
+        15:05 RyouToppa 起跑时画面上多了一个"退出游戏 / 确定要退出游戏? 取消 确认"弹窗
+        (模态弹窗, 点弹窗以外的地方一律无效)。ui_goto 认得 page_main, 于是一遍遍点
+        "探索"灯(约 670,156) —— 页面上什么都不会发生 —— 60s 后
+        `Cannot goto page[page_kekkai_toppa], timeout[60s] reached`, 再被设备判
+        GameStuckError, 整个任务被这一个弹窗点死。
+        识别用"退出游戏"标题素材、动作点"取消"素材本身: 两个都命中才点, 而且点的是匹配
+        到的位置, 弹窗水平位置有偏移也不会点歪到旁边的"确认"。
+        """
+        if not self.ui_blocking_dialogs:
+            return False
+        # 弹窗点不掉时别连着猛点(设备端 10 次就判连点重启游戏), 每 blocking_dialog_interval
+        # 秒最多试一次; 调用方 ui_get_current_page 的 10s 看门狗保证总有收手的时候。
+        if self._blocking_dialog_timer is None:
+            self._blocking_dialog_timer = Timer(self.blocking_dialog_interval)
+        if not self._blocking_dialog_timer.reached():
+            return False
+        self.maybe_screenshot(skip_first_screenshot)
+        for condition, action in self.ui_blocking_dialogs:
+            if self.appear(condition):
+                if self.appear_then_click(action):
+                    self._blocking_dialog_timer.reset()
+                    logger.warning(f'Blocking dialog {condition} on {self.ui_current}, '
+                                   f'click {action} to dismiss')
+                    return True
+        return False
+
     def ui_get_current_page(self, skip_first_screenshot=True) -> Page:
         """
         获取当前页面
@@ -122,6 +165,12 @@ class GameUi(BaseTask, GameUiAssets):
             # 如果10S还没有到底，那么就抛出异常
             if timeout.reached():
                 break
+            # 挡路的模态弹窗先收掉: 不收的话下面会把"弹窗背后的页面"当成当前页面返回,
+            # 调用方拿着这个页面去点就什么都点不动(2026-10-02 15:05 那 60s 就是这么来的)。
+            # 这里不重置 timeout, 弹窗点不掉时仍然会超时报 GamePageUnknownError -> 重启游戏。
+            if self.try_close_blocking_dialog(skip_first_screenshot=True):
+                self.maybe_screenshot(False)  # 刚点掉弹窗, 重新截一张再判页面
+                continue
             # Known pages
             for page in self.ui_pages:
                 if not page.check_button:

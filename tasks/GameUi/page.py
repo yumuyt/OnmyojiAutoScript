@@ -59,7 +59,10 @@ class Page:
 page_login = Page(G.I_CHECK_LOGIN_FORM)
 # Main Home 主页
 page_main = Page(G.I_CHECK_MAIN)
-page_main.additional = [G.I_AD_CLOSE_RED, G.I_BACK_FRIENDS, RestartAssets.I_CANCEL_BATTLE,
+# 第一项是模态弹窗: 出现"退出游戏/确定要退出游戏?/取消/确认"时, 庭院上什么都点不动,
+# 连下面的探索灯也是点了没反应(2026-10-02 15:05 的 60s 超时)。识别标题素材后点"取消"。
+page_main.additional = [[G.I_QUIT_GAME_DIALOG, G.I_QUIT_GAME_CANCEL],
+                        G.I_AD_CLOSE_RED, G.I_BACK_FRIENDS, RestartAssets.I_CANCEL_BATTLE,
                             GGA.I_CHAT_CLOSE_BUTTON, G.I_CLOSE_CHAT_WINDOW,
                             [G.I_MAIN_GOTO_SHIKIGAMI_RECORDS, RestartAssets.C_LOGIN_SCROLL_CLOSE_AREA, True]]
 # 召唤summon

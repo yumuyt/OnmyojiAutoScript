@@ -1,0 +1,20 @@
+[
+  {
+    "itemName": "quit_game_dialog",
+    "imageName": "additional_quit_game_dialog.png",
+    "roiFront": "407,263,121,51",
+    "roiBack": "312,238,655,92",
+    "method": "Template matching",
+    "threshold": 0.9,
+    "description": "退出游戏确认弹窗的标题「退出游戏」"
+  },
+  {
+    "itemName": "quit_game_cancel",
+    "imageName": "additional_quit_game_cancel.png",
+    "roiFront": "780,425,48,28",
+    "roiBack": "620,410,660,70",
+    "method": "Template matching",
+    "threshold": 0.9,
+    "description": "退出游戏确认弹窗的「取消」按钮"
+  }
+]

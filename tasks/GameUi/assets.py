@@ -35,6 +35,13 @@ class GameUiAssets:
 
 
 	# Image Rule Assets
+	# 退出游戏确认弹窗的标题「退出游戏」 
+	I_QUIT_GAME_DIALOG = RuleImage(roi_front=(407,263,121,51), roi_back=(312,238,655,92), threshold=0.9, method="Template matching", file="./tasks/GameUi/additional/additional_quit_game_dialog.png")
+	# 退出游戏确认弹窗的「取消」按钮 
+	I_QUIT_GAME_CANCEL = RuleImage(roi_front=(780,425,48,28), roi_back=(620,410,660,70), threshold=0.9, method="Template matching", file="./tasks/GameUi/additional/additional_quit_game_cancel.png")
+
+
+	# Image Rule Assets
 	# description 
 	I_AD_DISAPPEAR = RuleImage(roi_front=(412,405,37,40), roi_back=(412,405,37,40), threshold=0.75, method="Template matching", file="./tasks/GameUi/additional/additional_ad_disappear.png")
 	# description 
