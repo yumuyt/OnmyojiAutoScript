@@ -137,8 +137,38 @@ class ScriptTask(GameUi, ReplaceShikigami, KekkaiUtilizeAssets):
                 if not self.appear(self.I_REALM_SHIN):
                     continue
                 break
+            # "是否育成候补式神"弹窗是模态的, 弹着的时候点返回键没有任何效果,
+            # 不处理它就会一直点到 GameTooManyClickError(2026-10-02 05:29 的事故)
+            if self.dismiss_alternate_confirm():
+                continue
             if self.appear_then_click(self.I_UI_BACK_BLUE, interval=2.5):
                 continue
+
+    def dismiss_reward_panel(self, timeout: float = 5, max_click: int = 4) -> bool:
+        """
+        点掉"获得奖励"面板, 并等它真的消失
+
+        为什么不能一边挂着面板一边点寮体力: 面板中央就是那个体力图标,
+        I_GUILD_AP 在面板上实测有 0.8238 的匹配分(阈值 0.8), 点它其实是点这个图标,
+        只会弹出道具详情 tooltip, 面板再也点不掉 ——
+        2026-10-02 06:11 的事故就是 KU_GUILD_AP / UI_UI_REWARD 互点到次数超限, 游戏被重启
+        点击次数也有上限: 同一个按钮点满 10 次会被 OAS 判成连点
+        :param timeout: 最多等多久
+        :param max_click: 最多点几次
+        :return: 面板是否已经消失
+        """
+        timer = Timer(timeout)
+        timer.start()
+        clicks = 0
+        while 1:
+            self.screenshot()
+            if not self.appear(self.I_UI_REWARD, threshold=0.6):
+                return True
+            if timer.reached() or clicks >= max_click:
+                logger.warning(f'Reward panel still appear after {clicks} click(s), give up')
+                return False
+            if self.appear_then_click(self.I_UI_REWARD, action=self.C_UI_REWARD, interval=0.8, threshold=0.6):
+                clicks += 1
 
     def check_guild_ap_or_assets(self, ap_enable: bool = True, assets_enable: bool = True) -> bool:
         """
@@ -152,8 +182,12 @@ class ScriptTask(GameUi, ReplaceShikigami, KekkaiUtilizeAssets):
         while 1:
             self.screenshot()
 
-            # 获得奖励
-            if self.ui_reward_appear_click():
+            # 获得奖励: 先点掉并等它消失, 面板还在的时候不能去点寮体力
+            # (否则点的是面板里的体力图标, 面板永远点不掉, 见 dismiss_reward_panel)
+            if self.appear(self.I_UI_REWARD, threshold=0.6):
+                if not self.dismiss_reward_panel():
+                    logger.warning('Reward panel cannot be dismissed, stop guild harvest')
+                    return click_ap
                 timer_check.reset()
                 continue
 
@@ -184,7 +218,7 @@ class ScriptTask(GameUi, ReplaceShikigami, KekkaiUtilizeAssets):
                 # 等待1秒，看到获得奖励
                 time.sleep(1)
                 logger.info('appear_click guild_ap success')
-                if self.ui_reward_appear_click(True):
+                if self.appear(self.I_UI_REWARD, threshold=0.6) and self.dismiss_reward_panel():
                     logger.info('appear_click reward success')
                     click_ap = True
                     timer_check.reset()

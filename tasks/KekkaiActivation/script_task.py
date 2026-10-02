@@ -390,6 +390,10 @@ class ScriptTask(KU, KekkaiActivationAssets):
                 if not self.appear(self.I_REALM_SHIN):
                     continue
                 break
+            # "是否育成候补式神"弹窗是模态的, 弹着的时候点返回键没有任何效果,
+            # 不处理它就会一直点到 GameTooManyClickError(2026-10-02 05:29 的事故)
+            if self.dismiss_alternate_confirm():
+                continue
             if self.appear_then_click(self.I_UI_BACK_BLUE, interval=2.5):
                 continue
 

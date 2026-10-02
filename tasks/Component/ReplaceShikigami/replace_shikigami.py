@@ -78,6 +78,25 @@ class ReplaceShikigami(BaseTask, ReplaceShikigamiAssets):
                 self.appear_then_click(self.I_RS_LEVEL_MAX, interval=0.5)
         logger.info('Unset all shikigami max lv')
 
+    def dismiss_alternate_confirm(self) -> bool:
+        """
+        点掉"是否育成候补式神"确认弹窗(顺手勾上"不再提示")
+
+        这个弹窗是模态的: 它弹着的时候, 返回键和别处的按钮全都会被吃掉
+        2026-10-02 05:29 的事故: set_shikigami 的循环因为 stop_image 被弹窗挡住而提前判定结束,
+        调用方接着在这个弹窗上连点 10 次返回键, 触发 GameTooManyClickError 把游戏重启了
+        :return: 是否处理了弹窗
+        """
+        # 勾上"不再提示", 同一帧里接着点确定(候补式神确认)
+        if self.appear_then_click(self.I_U_CIRCLE_ALTERNATE, interval=2.5):
+            self.appear_then_click(self.I_U_CONFIRM_ALTERNATE, interval=1.5)
+            return True
+        if self.appear_then_click(self.I_U_CONFIRM_ALTERNATE, interval=1.5):
+            return True
+        if self.appear_then_click(self.I_UI_CONFIRM, interval=1):
+            return True
+        return False
+
     def set_shikigami(self, shikigami_order: int = 7, stop_image: RuleImage = None):
         """
         要求在式神育成的界面
@@ -118,7 +137,9 @@ class ReplaceShikigami(BaseTask, ReplaceShikigamiAssets):
                 continue
 
             # 是否育成候补式神按钮
-            if self.appear_then_click(self.I_UI_CONFIRM, interval=1) or self.appear_then_click(self.I_UI_CONFIRM_SAMLL, interval=1):
+            if self.appear_then_click(self.I_UI_CONFIRM_SAMLL, interval=1):
+                continue
+            if self.dismiss_alternate_confirm():
                 continue
             # 与下方点击第7个式神操作互斥, 防止确认按钮还没有出现被下方取消掉
             if not clicked and self.click(click_match, interval=1.5):
@@ -129,9 +150,12 @@ class ReplaceShikigami(BaseTask, ReplaceShikigamiAssets):
                 # 导致一直无法选上
                 clicked = True
                 continue
-            if self.appear_then_click(self.I_U_CIRCLE_ALTERNATE, interval=2.5):
-                self.appear_then_click(self.I_U_CONFIRM_ALTERNATE, interval=1.5)
-                continue
+        # stop_image 消失的一瞬间可能刚好弹出"是否育成候补式神"确认弹窗,
+        # 弹窗是模态的, 会把它后面的返回键全吃掉, 所以离开前再补点一轮
+        for _ in range(2):
+            self.screenshot()
+            if not self.dismiss_alternate_confirm():
+                break
         logger.info('Set shikigami: %d' % shikigami_order)
 
     def detect_no_shikigami(self) -> bool:
