@@ -885,7 +885,11 @@ Java.perform(function() {{
             sql = 'SELECT uid, token, account, ursAuthedToken, ursAuhtedId, authType FROM userauths LIMIT 1'
             db_path = f'/data/data/{GL_PACKAGE}/databases/auth'
             # 用单条字符串传给 adb shell，避免参数拆分导致 SQL 断裂
-            shell_cmd = f'su 0 sqlite3 {db_path} "{sql}"'
+            # MuMu 15 没有 su，adbd 已经是 root 时直接用 sqlite3
+            if self._shell_uid_is_root():
+                shell_cmd = f'sqlite3 {db_path} "{sql}"'
+            else:
+                shell_cmd = f'su 0 sqlite3 {db_path} "{sql}"'
             result = subprocess.run(
                 [ADB_PATH] + (['-s', self._adb_serial] if getattr(self, '_adb_serial', None) else []) +
                 ['shell', shell_cmd],
@@ -1224,6 +1228,9 @@ Java.perform(function() {
                 return True
             elif code == 801 or '已领取' in msg:
                 logger.info(f'  已领取过: {title}')
+            elif '请到游戏中' in msg:
+                # 例如"累计启动游戏100天礼包"：这类奖励只能在游戏里自己领，不是错误
+                logger.info(f'  需在游戏内领取: {title} - {msg}')
             elif self._is_token_expired(code, msg):
                 # Token过期，重新登录后重试
                 if self._relogin():
