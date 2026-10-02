@@ -173,10 +173,9 @@ class ScriptTask(BaseTask):
             self._adb_shell(['am', 'force-stop', GL_PACKAGE])
         except Exception:
             pass
-        try:
-            self._adb_shell(['su -c "killall frida-server"'])
-        except Exception:
-            pass
+        # 有 su 的模拟器用 su 杀；adbd 已是 root 时直接 killall 也生效
+        self._try_shell(['su -c "killall frida-server"'])
+        self._try_shell(['killall frida-server'])
 
         if restore_game:
             try:
@@ -199,6 +198,13 @@ class ScriptTask(BaseTask):
 
     def _adb_shell(self, cmd, timeout=15):
         return self._adb_cmd(['shell'] + cmd, timeout=timeout)
+
+    def _try_shell(self, cmd, timeout=15):
+        """执行 adb shell，失败只返回空字符串，不抛异常。"""
+        try:
+            return self._adb_shell(cmd, timeout=timeout)
+        except Exception:
+            return ''
 
     def _get_app_pid(self):
         try:
@@ -392,25 +398,81 @@ class ScriptTask(BaseTask):
             logger.error(f'推送失败: {e}')
             return False
 
+    def _shell_uid_is_root(self):
+        """当前 adb shell 是否已经是 root（adbd 以 root 运行，即 adb root 生效）。"""
+        try:
+            return 'uid=0' in self._adb_shell(['id'], timeout=10)
+        except Exception:
+            return False
+
+    def _has_su(self):
+        """模拟器里是否有可用的 su（MuMu 12 等开启 Root 后会提供）。"""
+        try:
+            return 'uid=0' in self._adb_shell(['su', '-c', 'id'], timeout=10)
+        except Exception:
+            return False
+
+    def _acquire_root(self):
+        """让后续 adb shell 以 root 身份执行，返回取得 root 的方式。
+
+        - 'su'  : 模拟器提供了 su
+        - 'adb' : 没有 su，但 adbd 可以用 adb root 提权
+                  （MuMu 15 / Android 15 用 KernelSU，不再提供 su）
+        - None  : 两种方式都拿不到 root
+        """
+        if self._shell_uid_is_root():
+            return 'adb'
+        if self._has_su():
+            return 'su'
+
+        logger.info('模拟器没有 su，尝试 adb root 提权...')
+        try:
+            output = self._adb_cmd(['root'], timeout=15).strip()
+            logger.info(f'adb root: {output}')
+        except Exception as e:
+            logger.warning(f'adb root 失败: {e}')
+            return None
+        if 'cannot run as root' in output:
+            return None
+
+        # adbd 重启期间设备可能短暂 offline，轮询等待
+        for _ in range(5):
+            time.sleep(1)
+            if self._shell_uid_is_root():
+                return 'adb'
+        return None
+
     def _start_frida_server(self):
         logger.info('启动Frida Server...')
-        # 使用 su + nohup 以 root 身份后台启动，否则无权 attach 其他进程
-        # 将 stdout/stderr 重定向到 /dev/null 避免阻塞
-        start_cmd = f'su -c "nohup {FRIDA_SERVER_REMOTE} > /dev/null 2>&1 &"'
-        try:
-            self._adb_shell([start_cmd], timeout=5)
-        except subprocess.TimeoutExpired:
-            # su 启动可能超时，但进程已经在后台运行了
-            pass
-        except Exception:
-            pass
+        root_mode = self._acquire_root()
+        if root_mode is None:
+            logger.error('无法获取root权限：模拟器未开启Root模式，且 adb root 不可用')
+            return False
+
+        if root_mode == 'su':
+            # 使用 su + nohup 以 root 身份后台启动，否则无权 attach 其他进程
+            # 将 stdout/stderr 重定向到 /dev/null 避免阻塞
+            self._try_shell(['su -c "killall frida-server"'])
+            start_cmd = f'su -c "nohup {FRIDA_SERVER_REMOTE} > /dev/null 2>&1 &"'
+            try:
+                self._adb_shell([start_cmd], timeout=5)
+            except subprocess.TimeoutExpired:
+                # su 启动可能超时，但进程已经在后台运行了
+                pass
+            except Exception:
+                pass
+        else:
+            # adbd 已经是 root：直接 setsid 脱离当前 shell 启动，不依赖 su/nohup
+            self._try_shell(['killall frida-server'])
+            self._try_shell([f'setsid {FRIDA_SERVER_REMOTE} > /dev/null 2>&1 &'])
+
         # 轮询检测启动状态，最多等10秒
         for _ in range(5):
             time.sleep(2)
             if self._is_frida_server_running():
                 logger.info('Frida Server已启动')
                 return True
-        logger.error('Frida Server启动失败，请确保模拟器已开启Root模式')
+        logger.error('Frida Server启动失败：模拟器未开启Root模式，或 frida-server 无法以 root 运行')
         return False
 
     def _ensure_frida_server_running(self):
@@ -423,14 +485,29 @@ class ScriptTask(BaseTask):
 
     # ======================== Frida 脚本执行 ========================
 
-    def _get_frida_exe(self):
-        """获取 frida 可执行文件路径"""
+    def _get_frida_cmd(self):
+        """返回启动 frida 的基础命令（后续再拼 -D/-U、-p）。
+
+        直接用 `python -m frida_tools.repl`，不走 Scripts\\frida.exe：
+        那类 console script 启动器把解释器路径写死在 exe 里，安装目录被搬动过
+        （D:\\OnmyojiAutoScript-easy-install → E:\\yumuyt\\OnmyojiAutoScript）之后
+        会静默 exit 1，frida REPL 永远起不来。
+        """
         python_dir = os.path.dirname(sys.executable)
+        python_exe = os.path.join(python_dir, 'python.exe')
+        if not os.path.exists(python_exe):
+            python_exe = sys.executable
+        try:
+            import frida_tools.repl  # noqa: F401
+            return [python_exe, '-m', 'frida_tools.repl']
+        except ImportError:
+            pass
+
+        # 回退：同目录下的 frida.exe，再退到 PATH
         frida_exe = os.path.join(python_dir, 'Scripts', 'frida.exe')
         if os.path.exists(frida_exe):
-            return frida_exe
-        # 回退：依赖 PATH
-        return 'frida'
+            return [frida_exe]
+        return ['frida']
 
     def _ensure_frida_repl(self, pid):
         """确保有一个常驻的 frida REPL 进程 attach 到目标 PID。
@@ -453,11 +530,11 @@ class ScriptTask(BaseTask):
             self._frida_session = None
             self._frida_attached_pid = None
 
-        frida_exe = self._get_frida_exe()
+        frida_cmd = self._get_frida_cmd()
         if hasattr(self, '_adb_serial') and self._adb_serial:
-            cmd = [frida_exe, '-D', self._adb_serial, '-p', str(pid)]
+            cmd = frida_cmd + ['-D', self._adb_serial, '-p', str(pid)]
         else:
-            cmd = [frida_exe, '-U', '-p', str(pid)]
+            cmd = frida_cmd + ['-U', '-p', str(pid)]
 
         try:
             proc = subprocess.Popen(
@@ -602,12 +679,11 @@ class ScriptTask(BaseTask):
             f.write(script_content)
             script_path = f.name
         try:
-            frida_exe = self._get_frida_exe()
-
+            frida_cmd = self._get_frida_cmd()
             if hasattr(self, '_adb_serial') and self._adb_serial:
-                frida_cmd = [frida_exe, '-D', self._adb_serial, '-p', str(pid), '-l', script_path, '-q']
+                frida_cmd += ['-D', self._adb_serial, '-p', str(pid), '-l', script_path, '-q']
             else:
-                frida_cmd = [frida_exe, '-U', '-p', str(pid), '-l', script_path, '-q']
+                frida_cmd += ['-U', '-p', str(pid), '-l', script_path, '-q']
 
             process = subprocess.Popen(
                 frida_cmd,
