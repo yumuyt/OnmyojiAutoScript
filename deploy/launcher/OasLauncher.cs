@@ -1,4 +1,4 @@
-// OAS 启动器（编译产物：oas.exe）
+﻿// OAS 启动器（编译产物：oas.exe）
 //
 // 作用与官方 deploy/launcher/oas-gui.bat 类似：双击即可启动 OAS，
 // 但额外支持 Web 服务模式（配合 OASX 面板）、环境自检等。
@@ -74,6 +74,15 @@ internal static class OasLauncher
         Console.WriteLine("[oas] 根目录 : " + root);
         Console.WriteLine("[oas] Python : " + python.Display);
 
+        // ------------------------------------------------------------------ 首次自举
+        // 一键包刚解压（目录里只有 toolkit / deploy / config，没有 server.py）时，
+        // 双击本 exe 应当先跑 deploy.installer：git clone + pip install + 配置 adb。
+        if (!File.Exists(Path.Combine(root, "server.py")) && opts.Mode != Mode.Update)
+        {
+            int rc = BootstrapInstall(root, python);
+            if (rc != 0) return rc;
+        }
+
         switch (opts.Mode)
         {
             case Mode.Check:
@@ -124,7 +133,9 @@ internal static class OasLauncher
             {
                 bool hasServer = File.Exists(Path.Combine(dir.FullName, "server.py"));
                 bool hasGui = File.Exists(Path.Combine(dir.FullName, "gui.py"));
-                if (hasServer && hasGui)
+                // 也接受"一键包根目录"：只有 toolkit + deploy/installer.py、还没拉代码的状态
+                bool isBootstrap = File.Exists(Path.Combine(dir.FullName, "deploy", "installer.py"));
+                if ((hasServer && hasGui) || isBootstrap)
                 {
                     // 优先返回带 toolkit 的那一层（一键包根目录）
                     if (Directory.Exists(Path.Combine(dir.FullName, "toolkit")))
@@ -270,6 +281,40 @@ internal static class OasLauncher
             Console.WriteLine("[oas] 启动失败: " + e.Message);
             return 1;
         }
+    }
+
+    /// <summary>
+    /// 首次安装：调用 deploy/installer（拉代码 + pip 装依赖 + 配置 adb）。
+    /// 一键包刚解压、目录里只有 toolkit 与 deploy/ 时走这里。
+    /// </summary>
+    private static int BootstrapInstall(string root, Python python)
+    {
+        if (!File.Exists(Path.Combine(root, "deploy", "installer.py")))
+        {
+            Console.WriteLine("[oas] 未找到 deploy/installer.py，无法自动首次安装");
+            Console.WriteLine("[oas] 请从完整的一键包解压（包里应含 deploy/ 与 toolkit/）");
+            return Pause(2);
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("==========================================================");
+        Console.WriteLine("  首次运行：拉取代码 + 安装依赖（约 600MB，10~20 分钟）");
+        Console.WriteLine("  请勿关闭本窗口");
+        Console.WriteLine("==========================================================");
+        Console.WriteLine();
+
+        int rc = RunForeground(root, python, "-m deploy.installer");
+        if (rc != 0 || !File.Exists(Path.Combine(root, "server.py")))
+        {
+            Console.WriteLine();
+            Console.WriteLine("[oas] 首次安装失败（exit=" + rc + "）");
+            Console.WriteLine("[oas] 可手动重试: \"" + python.Display + "\" -m deploy.installer");
+            return Pause(1);
+        }
+
+        Console.WriteLine("[oas] 代码与依赖就绪，继续启动");
+        Console.WriteLine();
+        return 0;
     }
 
     private static int StartGui(string root, Python python, bool admin, bool quiet)
@@ -535,6 +580,7 @@ internal static class OasLauncher
         Console.WriteLine("OAS 启动器 v" + LauncherVersion);
         Console.WriteLine();
         Console.WriteLine("  oas.exe                  默认：有 PySide6 就开 GUI，否则启动 Web 服务");
+        Console.WriteLine("                           （一键包刚解压、没有代码时会先自动安装）");
         Console.WriteLine("  oas.exe --gui            强制启动 GUI");
         Console.WriteLine("  oas.exe --server         启动 Web 服务（OASX 面板连这个）");
         Console.WriteLine("  oas.exe --update         先跑 deploy.installer 再启动 GUI");
