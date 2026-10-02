@@ -58,6 +58,7 @@ class ScriptTask(BaseTask):
         self.frida_pid = None
         self._frida_session = None  # 常驻 frida.exe 子进程
         self._frida_attached_pid = None  # REPL 当前 attach 的 PID
+        self._frida_restarted = False  # attach 失败后是否已经重启过APP
 
         self.session = requests.Session()
         self.session.verify = False
@@ -216,21 +217,36 @@ class ScriptTask(BaseTask):
         return None
 
     def _launch_app(self):
-        """启动大神APP。如果已在运行则直接返回PID，不会force-stop。"""
-        try:
-            # 先检查是否已在运行
-            pid = self._get_app_pid()
-            if pid:
-                logger.info('大神APP已在运行，无需重启')
-                return pid
+        """启动大神APP，返回一个可以被 frida attach 的 PID。
 
-            # 优先通过 ContentProvider 后台启动（不显示UI，需要 su 权限）
+        注意（MuMu 15 / Android 15 实测）：APP退到后台放置几十秒后，进程会被系统挂起，
+        这时 frida attach 必报 "unexpectedly timed out while waiting for stop from
+        process"（且会把该进程弄死）；而刚启动的进程 1~2 秒就能 attach 上。
+        所以已在运行的旧进程不能直接复用，先 force-stop 重启。
+        """
+        pid = self._get_app_pid()
+        if pid:
+            logger.info(f'大神APP已在运行 (PID: {pid})，重启以得到可 attach 的进程')
+            self._try_shell(['am', 'force-stop', GL_PACKAGE])
+            for _ in range(10):
+                time.sleep(1)
+                if not self._get_app_pid():
+                    break
+
+        try:
+            # 优先通过 ContentProvider 后台启动（不显示UI，需要 root）
             logger.info('后台启动大神APP进程...')
+            if self._shell_uid_is_root():
+                # adbd 已是 root（MuMu 15 没有 su），直接执行即可
+                provider_cmd = ['content', 'query', '--uri',
+                                f'content://{GL_PACKAGE}.utilcode.provider/']
+            else:
+                provider_cmd = ['su', '0', 'content', 'query', '--uri',
+                                f'content://{GL_PACKAGE}.utilcode.provider/']
             try:
                 subprocess.run(
                     [ADB_PATH] + (['-s', self._adb_serial] if getattr(self, '_adb_serial', None) else []) +
-                    ['shell', 'su', '0', 'content', 'query', '--uri',
-                     f'content://{GL_PACKAGE}.utilcode.provider/'],
+                    ['shell'] + provider_cmd,
                     capture_output=True, timeout=20, creationflags=_NO_WINDOW
                 )
             except subprocess.TimeoutExpired:
@@ -509,27 +525,8 @@ class ScriptTask(BaseTask):
             return [frida_exe]
         return ['frida']
 
-    def _ensure_frida_repl(self, pid):
-        """确保有一个常驻的 frida REPL 进程 attach 到目标 PID。
-        首次调用启动进程（~3-5秒），后续调用直接复用。
-        如果 PID 变了（APP重启），则关闭旧进程并重新 attach。
-        """
-        if self._frida_session is not None:
-            if self._frida_session.poll() is None:
-                # PID 没变，直接复用
-                if self._frida_attached_pid == pid:
-                    return self._frida_session
-                # PID 变了，需要重新 attach
-                logger.info(f'目标PID变更 ({self._frida_attached_pid} -> {pid})，重新attach...')
-                try:
-                    self._frida_session.kill()
-                except Exception:
-                    pass
-            else:
-                logger.warning('Frida REPL 进程已退出，重新启动...')
-            self._frida_session = None
-            self._frida_attached_pid = None
-
+    def _spawn_frida_repl(self, pid):
+        """启动一个 frida REPL 子进程 attach 到 pid，成功返回进程对象，失败返回 None。"""
         frida_cmd = self._get_frida_cmd()
         if hasattr(self, '_adb_serial') and self._adb_serial:
             cmd = frida_cmd + ['-D', self._adb_serial, '-p', str(pid)]
@@ -575,6 +572,42 @@ class ScriptTask(BaseTask):
             logger.warning(f'启动Frida REPL失败: {e}')
             self._frida_session = None
             return None
+
+    def _ensure_frida_repl(self, pid):
+        """确保有一个常驻的 frida REPL 进程 attach 到目标 PID。
+        首次调用启动进程（~3-5秒），后续调用直接复用。
+        如果 PID 变了（APP重启），则关闭旧进程并重新 attach。
+        attach 失败时（APP在后台被挂起）重启一次APP再试。
+        """
+        if self._frida_session is not None:
+            if self._frida_session.poll() is None:
+                # PID 没变，直接复用
+                if self._frida_attached_pid == pid:
+                    return self._frida_session
+                # PID 变了，需要重新 attach
+                logger.info(f'目标PID变更 ({self._frida_attached_pid} -> {pid})，重新attach...')
+                try:
+                    self._frida_session.kill()
+                except Exception:
+                    pass
+            else:
+                logger.warning('Frida REPL 进程已退出，重新启动...')
+            self._frida_session = None
+            self._frida_attached_pid = None
+
+        proc = self._spawn_frida_repl(pid)
+        if proc is not None:
+            return proc
+
+        # attach 不上：多半是APP在后台放久了被系统挂起，重启APP后用新PID再attach一次
+        if not self._frida_restarted:
+            self._frida_restarted = True
+            logger.warning('Frida attach 失败，重启大神APP后重试...')
+            new_pid = self._launch_app()
+            if new_pid:
+                self.frida_pid = new_pid
+                return self._spawn_frida_repl(new_pid)
+        return None
 
     def _ping_frida_repl(self, proc, timeout=8):
         """向 frida REPL 发送 ping 并等待回显，验证 REPL 已就绪。
