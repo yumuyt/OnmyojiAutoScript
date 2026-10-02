@@ -30,6 +30,7 @@ from tasks.KekkaiUtilize.config import KekkaiUtilize
 from tasks.KekkaiActivation.config import KekkaiActivation
 from tasks.DemonEncounter.config import DemonEncounter
 from tasks.DailyTrifles.config import DailyTrifles
+from tasks.Harvest.config import Harvest
 from tasks.TalismanPass.config import TalismanPass
 from tasks.Pets.config import Pets
 from tasks.SoulsTidy.config import SoulsTidy
@@ -101,6 +102,7 @@ class ConfigModel(ConfigBase):
     kekkai_activation: KekkaiActivation = Field(default_factory=KekkaiActivation)
     demon_encounter: DemonEncounter = Field(default_factory=DemonEncounter)
     daily_trifles: DailyTrifles = Field(default_factory=DailyTrifles)
+    harvest: Harvest = Field(default_factory=Harvest)
     talisman_pass: TalismanPass = Field(default_factory=TalismanPass)
     pets: Pets = Field(default_factory=Pets)
     souls_tidy: SoulsTidy = Field(default_factory=SoulsTidy)
@@ -165,7 +167,37 @@ class ConfigModel(ConfigBase):
             return
         data = self.read_json(config_name)
         data["config_name"] = config_name
+        self._migrate_harvest_config(data)
         super().__init__(**data)
+
+    @staticmethod
+    def _migrate_harvest_config(data: dict) -> None:
+        """
+        收菜从"重启"页搬到独立的收菜任务(tasks/Harvest)之后, 老配置里还留着 restart.harvest_config。
+
+        pydantic 会直接忽略未知字段, 那样用户勾过的收菜开关会静默丢失(退回默认值),
+        所以这里把老设置搬到新任务上, 并保持"是否收菜"的意图不变。
+
+        迁移只做一次: 搬完就把老字段删掉, 下次加载不会再进来。
+        """
+        restart = data.get('restart')
+        if not isinstance(restart, dict) or 'harvest_config' not in restart:
+            return
+        old = restart.pop('harvest_config') or {}
+        harvest = data.setdefault('harvest', {})
+        if not isinstance(harvest, dict):
+            return
+        scheduler = harvest.setdefault('scheduler', {})
+        config = harvest.setdefault('harvest_config', {})
+        # 老开关只管"登录后要不要顺手收菜", 等价于收菜任务自己的调度开关
+        if 'enable' in old:
+            scheduler['enable'] = old['enable']
+        for key in ('enable_courtyard_affairs', 'enable_jade', 'enable_sign', 'enable_sign_999',
+                    'enable_mail', 'enable_soul', 'enable_ap'):
+            if key in old:
+                config[key] = old[key]
+        logger.info(f'Migrate restart.harvest_config -> harvest: {old}')
+        return
 
     def __setattr__(self, key, value):
         """

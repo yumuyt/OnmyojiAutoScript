@@ -153,8 +153,17 @@
   "daily_cost_limit_help": "游戏内「每日消耗上限」的总量，读满即视为今日次数已用完",
   "random_sleep": "点击战斗前随机休息",
   "ffs_random_sleep_help": "点「退治」开始战斗前，有 20% 概率随机停 2~6 秒，用来打散固定节奏（防封）。与项目里其它任务的做法一致",
-  "run_time_1": "第1次宴会时刻",
+  "run_time_1": "第1次收菜时刻",
   "Run Time 1": "第1次宴会时刻",
-  "run_time_2": "第2次宴会时刻",
-  "Run Time 2": "第2次宴会时刻"
+  "run_time_2": "第2次收菜时刻",
+  "Run Time 2": "第2次宴会时刻",
+  "Harvest": "收菜",
+  "harvest_time": "收菜时刻",
+  "harvest_time_help": "收菜的内置时间: 每天两次, 到点自动收, 不依赖\"下一次运行时间\"。游戏没在跑会先起游戏并登录",
+  "schedule": "定时重启",
+  "restart_schedule_help": "勾选后才会按固定时间重启游戏(用于每天固定重启一次)。\n不勾选时重启只是\"卡死恢复/手动调用\"用的工具: 不会自己定时跑, 下面的时间/间隔都不生效。",
+  "harvest_run_time_1_help": "默认 00:15(跨天后的第一次)",
+  "harvest_run_time_2_help": "默认 20:00; 两个时刻可以配成同一个, 等于每天只收一次",
+  "harvest_courtyard_affairs_help": "庭院事务(花合战/每日六星御魂等), 只会在收菜时做一次",
+  "harvest_enable_help": "这个一个部分是为了在登录游戏时，自动点击赠送的奖励"
 }

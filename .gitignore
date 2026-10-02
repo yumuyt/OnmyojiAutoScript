@@ -8,6 +8,8 @@ config/*.yaml
 config/*.json
 config/tmp*
 !config/template*.json
+# 本地改配置前的备份(运行时数据, 不进仓库)
+config/*.bak*
 config/*.crt
 *.pyw
 dev_tools/debug_tools

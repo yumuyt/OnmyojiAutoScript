@@ -187,6 +187,7 @@
 	<message><source>KekkaiActivation</source><translation>结界挂卡</translation></message>
 	<message><source>DemonEncounter</source><translation>封魔之时</translation></message>
 	<message><source>DailyTrifles</source><translation>每日琐事</translation></message>
+	<message><source>Harvest</source><translation>收菜</translation></message>
 	<message><source>TalismanPass</source><translation>花合战</translation></message>
 	<message><source>SoulsTidy</source><translation>御魂整理</translation></message>
 	<message><source>Pets</source><translation>小猫咪</translation></message>
@@ -236,6 +237,7 @@
 	<message><source>KekkaiActivation</source><translation>结界挂卡</translation></message>
 	<message><source>DemonEncounter</source><translation>封魔之时</translation></message>
 	<message><source>DailyTrifles</source><translation>每日琐事</translation></message>
+	<message><source>Harvest</source><translation>收菜</translation></message>
 	<message><source>TalismanPass</source><translation>花合战</translation></message>
 	<message><source>SoulsTidy</source><translation>御魂整理</translation></message>
 	<message><source>Pets</source><translation>小猫咪</translation></message>
@@ -356,6 +358,8 @@ window_background >>> DroidCast_raw >  ADB_nc >> DroidCast > uiautomator2 ~= ADB
 	<message><source>failure_interval_help</source><translation>一般默认即可，时间格式同上，不按照格式输入会无法正确设置</translation></message>
 	<message><source>server_update_help</source><translation>如果设定不是默认的 "09:00:00",该任务每次执行完毕后会强制设定下次运行时间为第二天的设定值
 格式 hh:mm:ss </translation></message>
+	<message><source>restart_schedule_help</source><translation>勾选后才会按固定时间重启游戏(用于每天固定重启一次)。
+不勾选时重启只是"卡死恢复/手动调用"用的工具: 不会自己定时跑, 上面填的时间也不会生效。</translation></message>
 </context>
 <context>
     <name>Args</name>
@@ -491,6 +495,9 @@ mode_3策略是刷到五个契灵后开始结契，选择高级、中级盘来�
     <name>Args</name>
 	<message><source>HarvestConfig</source><translation>收获奖励</translation></message>
 	<message><source>harvest_enable_help</source><translation>这个一个部分是为了在登录游戏时，自动点击赠送的奖励。是必选项，列出来是给各位阴阳师大大知道有这个东西。欢迎补充如果缺少</translation></message>
+	<message><source>Enable Courtyard Affairs</source><translation>庭院事务</translation></message>
+	<message><source>harvest_courtyard_affairs_help</source><translation>庭院事务(花合战/每日六星御魂等), 只会在收菜时做一次</translation></message>
+	<message><source>harvest_time</source><translation>每天几点执行</translation></message>
 	<message><source>Enable Jade</source><translation>永久勾玉卡</translation></message>
 	<message><source>Enable Sign</source><translation>每日签到</translation></message>
 	<message><source>Enable Sign 999</source><translation>签到999天后的签到福袋</translation></message>

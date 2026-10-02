@@ -53,8 +53,9 @@ class Script:
         self._emulator_down = False
         self.gui_update_task: Callable = None  # 回调函数, gui进程注册当每次config更新任务的时候更新gui的信息
         self.config_name = config_name
-        # Skip first restart
-        self.is_first_task = True
+        # 启动时那次"跳过 Restart"只做一次。
+        # 不这样做的话: 跳过分支之后 Restart 仍然 pending, 会被反复推迟 / 或者空转刷日志。
+        self._restart_deferred_from_startup = False
         # Failure count of tasks
         # Key: str, task name, value: int, failure count
         self.failure_record = {}
@@ -667,10 +668,15 @@ class Script:
 
             # Get task
             task = self.get_next_task()
-            # Skip first restart
-            if self.is_first_task and task == 'Restart':
-                logger.info('Skip task `Restart` at scheduler start')
-                self.config.task_delay(task='Restart', success=True, server=True)
+            # 启动时如果 Restart 就是待办(没勾"定时重启"), 不要立刻停/起游戏做那次登录重启:
+            # 直接把它推到一周后。只需要推一次, 之后无论是时间到了还是被调用,
+            # 都正常执行, 执行完由 app_restart 再排到一周后。
+            if task == 'Restart' and not self.config.restart.scheduler.schedule \
+                    and not self._restart_deferred_from_startup:
+                self._restart_deferred_from_startup = True
+                logger.info('Skip task `Restart` at scheduler start, defer 1 week')
+                self.config.task_delay(task='Restart', server=False,
+                                       target=datetime.now().replace(microsecond=0) + timedelta(weeks=1))
                 del_cached_property(self, 'config')
                 continue
 
@@ -690,7 +696,6 @@ class Script:
             success = self.run(inflection.camelize(task))
             self.config.model.running_task = ''
             logger.info(f'Scheduler: End task `{task}`')
-            self.is_first_task = False
             self.anti_ban_guard.record_active((datetime.now() - _task_start).total_seconds())
 
             # Check failures
