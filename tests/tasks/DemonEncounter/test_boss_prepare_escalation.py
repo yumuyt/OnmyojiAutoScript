@@ -18,6 +18,7 @@ from unittest import mock
 from tasks.Component.GeneralBattle.assets import GeneralBattleAssets
 from tasks.DemonEncounter import script_task as de
 from tasks.DemonEncounter.assets import DemonEncounterAssets
+from tasks.GlobalGame.assets import GlobalGameAssets
 
 
 class FakeTimer:
@@ -64,6 +65,15 @@ class FakeBossTask:
 
     I_BOSS_FIRE = DemonEncounterAssets.I_BOSS_FIRE
     I_BEST_BOSS_FIRE = DemonEncounterAssets.I_BEST_BOSS_FIRE
+    # find_boss 用的素材（194a3eda 那次 boss 搜索重写新增/改用的取用），
+    # 这里补齐 stub，否则本文件会以 AttributeError 失败（与本次改动无关的老问题）。
+    I_DE_BOSS = DemonEncounterAssets.I_DE_BOSS
+    I_DE_BOSS_BEST = DemonEncounterAssets.I_DE_BOSS_BEST
+    I_DE_BOX_CENTER = DemonEncounterAssets.I_DE_BOX_CENTER
+    I_JADE_50 = DemonEncounterAssets.I_JADE_50
+    I_DE_FIND = DemonEncounterAssets.I_DE_FIND
+    C_DM_BOSS_CLICK = DemonEncounterAssets.C_DM_BOSS_CLICK
+    I_UI_BACK_RED = GlobalGameAssets.I_UI_BACK_RED
     I_BOSS_CONFIRM = DemonEncounterAssets.I_BOSS_CONFIRM
     I_BOSS_GATHER = DemonEncounterAssets.I_BOSS_GATHER
     I_BOSS_WAIT = DemonEncounterAssets.I_BOSS_WAIT
@@ -79,6 +89,7 @@ class FakeBossTask:
             stuck_timer_long=None,
             stuck_record_clear=lambda: None,
             stuck_record_add=lambda button: None,
+            click_record_clear=lambda: None,
         )
         self.conf = SimpleNamespace(best_demon_battle_config=SimpleNamespace(
             best_demon_tsuchigumo_enable=False, best_demon_tsuchigumo='1,3'))

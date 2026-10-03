@@ -120,7 +120,12 @@ class ScriptTask(GameUi, GeneralBattle, DemonEncounterAssets, SwitchSoul):
                         self.ui_click_until_smt_disappear(self.I_DE_FIND, self.I_JADE_50, interval=1)
                         continue
                     if not self.appear_then_click(search_button, interval=2):
-                        raise GameStuckError(f'Cannot find {boss_name} search button')
+                        # 首领按钮一两次没认出来(实机上出现过 0.797 贴阈值的情况)不代表要重开局:
+                        # 本轮先退出, 交给下面"重进逢魔地图清状态"的恢复逻辑, 3 轮都找不到
+                        # 才放弃本次运行。全程不抛错、不重启游戏。
+                        logger.warning(f'{boss_name} search button not found '
+                                       f'(round {reenter_round}/3, attempt {search_attempt}/2)')
+                        break
                     logger.info(
                         f'Finding {boss_name}, attempt {search_attempt}/2 '
                         f'(re-enter round {reenter_round}/3)...'
@@ -162,9 +167,12 @@ class ScriptTask(GameUi, GeneralBattle, DemonEncounterAssets, SwitchSoul):
                 self.ui_goto_page(page_demon_encounter)
                 self.ui_goto_page(page_demon_encounter_realworld)
 
-            raise GameStuckError(
-                f'Cannot enter {boss_name} after 3 re-enter rounds'
-            )
+            # 3 轮重进地图都没找到: 放弃本次运行, 半小时后自己再来一次。
+            # 这里刻意不抛 GameStuckError —— 那会走"重启游戏"的路子,
+            # 而重进地图本身已经是最温和的恢复手段了。
+            logger.warning(f'Cannot enter {boss_name} after 3 re-enter rounds, '
+                           f'give up this run and retry later')
+            return False
 
         def enter_boss():
             logger.info('trying to enter boss...')
@@ -211,7 +219,12 @@ class ScriptTask(GameUi, GeneralBattle, DemonEncounterAssets, SwitchSoul):
             if fail_count >= 5:
                 return
             if not find_boss():
-                continue
+                # 首领找不到: 记一次失败, 并安排半小时后重试(逢魔 17:00-23:00 内还有机会),
+                # 全程不抛错、不重启游戏。server=False 是为了绕开 server_update
+                # 把下次运行时间强制改写成"明天 17:05"。
+                self.set_next_run(task='DemonEncounter', success=False, server=False,
+                                  target=datetime.now() + timedelta(minutes=30))
+                raise TaskEnd('DemonEncounter')
             if enter_boss():
                 break
             fail_count += 1

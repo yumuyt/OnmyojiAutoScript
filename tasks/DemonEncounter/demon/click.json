@@ -3,7 +3,7 @@
     "itemName": "de_1",
     "roiFront": "1222,497,39,25",
     "roiBack": "1222,497,39,25",
-    "description": "从下开始数第一个"
+    "description": "从下开始数第一个(点击区已收缩, 仅包住内部图形)"
   },
   {
     "itemName": "de_2",
