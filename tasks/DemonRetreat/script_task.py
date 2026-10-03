@@ -108,7 +108,7 @@ class ScriptTask(GameUi, GeneralBattle, SwitchSoul, DemonRetreatAssets, AbyssSha
         # 进入妖怪退治
         if not self.goto_demon_retreat():
             logger.warning("Failed to enter demon retreat")
-            if self.appear_then_click(self.I_DEMON_BACK_CHECK, interval=1):
+            if self.back_from_rank_panel():
                 pass
             self.goto_main()
             self.plan_after_failure(run_time, finish=False)
@@ -131,7 +131,7 @@ class ScriptTask(GameUi, GeneralBattle, SwitchSoul, DemonRetreatAssets, AbyssSha
                 break
             if self.appear(self.I_RANK_LSIT):
                 logger.info("No rewards to claim")
-                if self.appear_then_click(self.I_DEMON_BACK_CHECK, interval=1):
+                if self.back_from_rank_panel():
                     break
 
         # 保持好习惯，一个任务结束了就返回到庭院，方便下一任务的开始
@@ -148,6 +148,16 @@ class ScriptTask(GameUi, GeneralBattle, SwitchSoul, DemonRetreatAssets, AbyssSha
 
 
 
+    def back_from_rank_panel(self) -> bool:
+        """关掉"伤害排名"面板(左上返回键)
+
+        NOTE 任务自带的 I_DEMON_BACK_CHECK 是坏素材: 2026-10-03 那几帧只有 0.6969
+             (阈值 0.7, 历史全部截图最高 0.7187), 差一点点就是点不到 -> 面板一直开着 ->
+             goto_demon_retreat 每轮都判"没进去"。这里补上通用的页面返回键(同帧 0.9670)。
+        """
+        return (self.appear_then_click(self.I_BACK_Y, interval=1)
+                or self.appear_then_click(self.I_DEMON_BACK_CHECK, interval=1))
+
     def goto_demon_retreat(self) -> bool:
         """
         进入首领退治
@@ -157,8 +167,22 @@ class ScriptTask(GameUi, GeneralBattle, SwitchSoul, DemonRetreatAssets, AbyssSha
         self.ui_goto(page_guild)
 
         goto_demon_retreat_num = 0
+        # 面板关不掉时的兜底: 这个循环原来只靠 I_HUNT 的出现次数计数(goto_demon_retreat_num),
+        # 而面板一挡住 I_HUNT 就再也不出现 -> 计数器永远是 1 -> 无限循环
+        # (2026-10-03 实测 58~83 轮 × (sleep3+sleep20) ≈ 22~32 分钟, 全程零点击, 最后被 device 的
+        #  "60 秒 + 60 张截图无点击"卡死检测打断; 又因为卡死不走任务的排期逻辑, next_run 一直是
+        #  过期的 19:20, 调度器立刻重排 -> 一轮又一轮地空跑)。现在按轮次 + 限时双重兜底,
+        # 到点就优雅失败, 交给 run() 里的 plan_after_failure 去排期(窗口内重试 / 排下周六)。
+        attempt = 0
+        give_up_timer = Timer(90).start()
         while 1:
             self.screenshot()
+            # 有界兜底放在 continue 之前, 免得被"进入神社"那条 continue 绕过
+            attempt += 1
+            if goto_demon_retreat_num >= 5 or attempt > 5 or give_up_timer.reached():
+                logger.warning(f'Cannot enter demon retreat (clicked hunt {goto_demon_retreat_num} times, '
+                               f'{attempt} rounds, {give_up_timer.current():.0f}s), give up this run')
+                break
             # 进入神社
             if self.appear_then_click(self.I_SHRINE, interval=1):
                 logger.info("Enter I_SHRINE")
@@ -182,7 +206,7 @@ class ScriptTask(GameUi, GeneralBattle, SwitchSoul, DemonRetreatAssets, AbyssSha
             if self.appear_then_click(self.I_REWARD_ALL, interval=1):
                 logger.info("Already challenged demon_retreat")
                 sleep(1)
-                if self.appear_then_click(self.I_DEMON_BACK_CHECK, interval=1):
+                if self.back_from_rank_panel():
                     pass
                 logger.info(f"The next time the demon retreat is next Saturday")
                 self.plan_next_saturday(self.retreat_run_time())
@@ -191,12 +215,9 @@ class ScriptTask(GameUi, GeneralBattle, SwitchSoul, DemonRetreatAssets, AbyssSha
             if self.appear(self.I_RANK_LSIT):
                 logger.info("Enter demon_retreat false")
                 sleep(3)
-                if self.appear_then_click(self.I_DEMON_BACK_CHECK, interval=1):
+                if self.back_from_rank_panel():
                     pass
                 sleep(20)
-            # 超过五次没有进入进入认为失败
-            if goto_demon_retreat_num >= 5:
-                break
         return False
 
     def demon_retreat(self):
