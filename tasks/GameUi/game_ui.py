@@ -23,6 +23,7 @@ from module.logger import logger
 from tasks.Component.GeneralBattle.assets import GeneralBattleAssets
 from tasks.GameUi.assets import GameUiAssets
 from tasks.GameUi.page import Page, PageRegistry, page_main, page_login, random_click
+from tasks.GlobalGame.assets import GlobalGameAssets
 from tasks.Restart.assets import RestartAssets
 from tasks.SixRealms.assets import SixRealmsAssets
 from tasks.base_task import BaseTask
@@ -31,7 +32,12 @@ from tasks.ActivityShikigami.assets import ActivityShikigamiAssets
 
 class GameUi(BaseTask, GameUiAssets):
     ui_current: Page = None
-    ui_close = [GameUiAssets.I_BACK_MALL, GeneralBattleAssets.I_CONFIRM,
+    # 模态确认弹窗优先关：花合战「是否立即启用"谎言世界"？」弹着的时候，
+    # 左上角返回键（I_UI_BACK_YELLOW / I_BACK_Y 等）会命中却点不动，
+    # 导航一直空转到 GameTooManyClickError（2026-10-03 14:03），
+    # 所以把这个「取消」排在返回键前面。用的是 GlobalGame 现成的 I_UI_CANCEL。
+    ui_close = [GlobalGameAssets.I_UI_CANCEL,
+                GameUiAssets.I_BACK_MALL, GeneralBattleAssets.I_CONFIRM,
                 BaseTask.I_UI_BACK_RED, BaseTask.I_UI_BACK_YELLOW,
                 GameUiAssets.I_BACK_FRIENDS, GameUiAssets.I_BACK_DAILY,
                 GameUiAssets.I_REALM_RAID_GOTO_EXPLORATION,

@@ -59,9 +59,15 @@ class Page:
 page_login = Page(G.I_CHECK_LOGIN_FORM)
 # Main Home 主页
 page_main = Page(G.I_CHECK_MAIN)
+# 最后一项是「式神录图标被登录公告卷轴挡住时，点一下卷轴把它收起来」。
+# 这里必须用带图鉴定的 I_MAIN_SCROLL_CLOSE（RuleImage），不能用原来的
+# C_LOGIN_SCROLL_CLOSE_AREA（RuleClick 盲点 1181,634,28,39）：
+# 卷轴没展开时那个位置不是卷轴，盲点会点到别的东西上——2026-10-03 13:36 / 14:01
+# 两次盲点都把游戏带进了花合战，随后撞上「是否立即启用谎言世界」弹窗把导航点死
+# （GameStuckError / GameTooManyClickError）。
 page_main.additional = [G.I_AD_CLOSE_RED, G.I_BACK_FRIENDS, RestartAssets.I_CANCEL_BATTLE,
                             GGA.I_CHAT_CLOSE_BUTTON, G.I_CLOSE_CHAT_WINDOW,
-                            [G.I_MAIN_GOTO_SHIKIGAMI_RECORDS, RestartAssets.C_LOGIN_SCROLL_CLOSE_AREA, True]]
+                            [G.I_MAIN_GOTO_SHIKIGAMI_RECORDS, G.I_MAIN_SCROLL_CLOSE, True]]
 # 召唤summon
 page_summon = Page(G.I_CHECK_SUMMON)
 page_summon.link(button=G.I_SUMMON_GOTO_MAIN, destination=page_main)
@@ -177,6 +183,12 @@ page_friends.link(button=G.I_BACK_Y, destination=page_main)
 page_main.link(button=G.I_MAIN_GOTO_FRIENDS, destination=page_friends)
 # 花合战 daily
 page_daily = Page(G.I_CHECK_DAILY)
+# 花合战一进页面就会弹「是否立即启用"谎言世界"？」，它是模态弹窗：弹着的时候
+# 左上角返回键点了没反应，page_daily -> page_main 会一直点不动，直到
+# click_record_check 报 GameTooManyClickError（2026-10-03 14:03 那次）。
+# 这个「取消」按钮就是 GlobalGame 的 I_UI_CANCEL（式神育成候补确认等弹窗同一套 UI），
+# 出现就先关掉；点「取消」不点「确定」，避免把谎言世界误启用。
+page_daily.additional = [GGA.I_UI_CANCEL]
 # page_daily.additional = [G.O_CLICK_CLOSE_1, G.O_CLICK_CLOSE_2]
 page_daily.link(button=G.I_BACK_Y, destination=page_main)
 page_main.link(button=G.I_MAIN_GOTO_DAILY, destination=page_daily)
