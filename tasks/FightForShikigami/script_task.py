@@ -1,6 +1,7 @@
 # This Python file uses the following encoding: utf-8
 # @author runhey
 # github https://github.com/runhey
+import os
 from time import sleep
 
 import numpy as np
@@ -39,34 +40,54 @@ from tasks.GameUi.page import page_main, page_shikigami_records
 class ScriptTask(RightActivity, GeneralBattle, SwitchSoul, FightForShikigamiAssets):
 
     # ---------------- 六边形网格几何（1280x720 实测标定） ----------------
-    # 六边形是「尖顶」六边形（左右两条竖直边），横向被拉伸：
-    #   · 相邻列间距（左右竖直边之间的距离）= 168
-    #   · 竖直边长度 ≈ 80
-    # 注意不是正六边形，高度 / 宽度比例与正六边形不同，改动前请重新标定。
+    # 六边形是「尖顶」六边形（左右两条竖直边），横向被拉伸。
     #
-    # 下面这几个容差是拿真实截图离线跑算法标定出来的，不要随意收紧：
-    # 竖边会被建筑/角色立绘截断，检测到的 y 中心最大会偏 ~19px，
-    # 所以合并和配对的 y 容差必须给够（行间距是 120，放宽到 35 也不会串行）。
+    # 2026-10-03 重新精测（逐行量描边轮廓，不是靠肉眼估）：
+    #   · 同排相邻格之间：格宽 164~175（平均 ~168），即列间距 = 168
+    #   · 竖直边长 60~92、斜边抬高（rise）≈ 0.20~0.24 × 格宽 ≈ 35~42
+    #   · **同一张图上不同排的格子尺寸不一样**（越靠上越小），
+    #     说明地图是按透视画的 → 不能用一套固定几何去套全图，
+    #     斜边验证必须用「候选格自己的两条竖边端点」推导局部几何。
+    #     实测：第 1 排 y≈130 的格 竖边 60px / rise≈40；
+    #           第 3 排 y≈355 的格 竖边 87px / rise≈37。
+    #
+    # 下面这几个容差不要随意收紧：竖边会被建筑 / 立绘 / 顶部公告栏截断，
+    # 配对时两条边的 y 中心最大会差 ~20px（实测 339.5 vs 357.8）。
     HEX_COL_STEP = 168
-    HEX_HALF_W = 84
-    HEX_EDGE_MIN = 44
-    HEX_EDGE_MAX = 128
-    HEX_EDGE_MERGE_GAP = 6      # 同一竖边允许的列断裂
-    HEX_EDGE_MERGE_DY = 25      # 同一竖边允许的 y 抖动
+    HEX_EDGE_MIN = 36           # 竖边最短长度（原为 44，门槛偏高会把偏暗的高亮边丢掉）
+    HEX_EDGE_MAX = 200
+    HEX_EDGE_GAP = 2            # 同一列里允许的断口（辉光不均匀 / 被小装饰压住）
+    HEX_EDGE_MERGE_DX = 2       # 相邻多少列算同一条竖边
+    HEX_EDGE_MIN_COLS = 2       # 一条竖边至少要有几列
     HEX_PAIR_DX_TOL = 12        # 配对时列间距容差
-    HEX_PAIR_DY_TOL = 35        # 配对时两条边的高度差容差
+    HEX_PAIR_DY_TOL = 40        # 配对时两条边的高度差容差
+    HEX_SAMPLE_N = 24           # 每条边采样多少个点
+    HEX_SAMPLE_WIN = 4          # 采样点半径（容忍 1~4px 标定误差）
+    HEX_RISE_RATIO = 0.22       # 斜边抬高 / 格宽（0.20~0.24 都测过，结果一致）
+    HEX_VERT_MIN = 0.6          # 竖边命中率下限
+    HEX_SLANT_BRIGHT = 0.5      # 斜边"算亮"的命中率下限
+    HEX_COVER_MIN = 0.6         # 斜边有效采样率下限（低于此值算"不可判"）
 
     # ---------------- 高亮黄判别 ----------------
     # 高亮格描边 ≈ RGB(255, 250, 140)，普通米黄格 ≈ RGB(215, 200, 135)
     # 两者 B 通道接近（都 ~135），主要差别在 R/G，所以用 R+G 做阈值。
-    YELLOW_RG = 480
-    YELLOW_B = 170
+    #
+    # 2026-10-03：R+G 从 480 放宽到 470、B 从 170 放宽到 190。
+    # 原因：第 1 排（y≈130）那几格的高亮边比第 3 排暗，
+    # 在 480 下左竖边只剩 ~35px 连续段 → 被"太短"丢掉 → 整格漏检
+    # （日志 09:44:54 漏掉 (640,135)，用户标注图里那格画的是红箭头）。
+    YELLOW_RG = 470
+    YELLOW_B = 190
 
     # 搜索范围，避开四周 UI（左上通报栏、顶部标题、底部按钮）
     MAP_TOP = 100
     MAP_BOTTOM = 640
     MAP_LEFT = 10
     MAP_RIGHT = 1270
+
+    # 最近一次检测的中间量（给 save_detect_debug 画调试图用，都是小列表）
+    _last_edges = ()
+    _last_rejected = ()
 
     def run(self):
         conf: FightForShikigami = self.config.fight_for_shikigami
@@ -251,6 +272,7 @@ class ScriptTask(RightActivity, GeneralBattle, SwitchSoul, FightForShikigamiAsse
                     random_sleep(probability=0.2)
                 if not self.click_until_battle_entry(cells):
                     logger.warning('所有高亮格都无法进入战斗，收工')
+                    self.save_detect_debug(cells, tag='no_entry')
                     break
 
             # 3. 次数是否已经用完
@@ -289,9 +311,15 @@ class ScriptTask(RightActivity, GeneralBattle, SwitchSoul, FightForShikigamiAsse
         except Exception as e:
             logger.warning(f'推送通知失败：{e}')
 
-    def click_until_battle_entry(self, cells: list, per_try_timeout: int = 10) -> bool:
-        """逐个点击高亮格，直到出现「妖怪退治」入口页"""
-        for cell in cells[:4]:
+    def click_until_battle_entry(self, cells: list, per_try_timeout: int = 6) -> bool:
+        """
+        逐个点击高亮格，直到出现「妖怪退治」入口页。
+
+        实测点击命中时入口页 0.6s 就出来了（日志 09:44:57.690 -> 09:44:58.354），
+        所以 6s 足够；点不出来的多半是"这一格已经打完了"（描边还在，点进去没有退治按钮）。
+        因此不要只试前 4 个就收工 —— 最多试 8 个，最坏 48s。
+        """
+        for cell in cells[:8]:
             logger.info(f'点击高亮格 {cell}')
             self.device.click(cell[0], cell[1], control_name='FfsHexCell')
             sleep(0.5)      # 点击后先让界面动起来，避免在动画中途判断
@@ -424,7 +452,45 @@ class ScriptTask(RightActivity, GeneralBattle, SwitchSoul, FightForShikigamiAsse
             logger.info('地图上没有可攻击的高亮格，八百八狸已标记「退治完成」，本次收工')
         else:
             logger.warning('地图上没有找到高亮格。如果此时明明还有可攻击目标，'
-                           '说明高亮格检测需要重新标定（黄色阈值 / 六边形网格几何），请抓图排查')
+                           '说明高亮格检测需要重新标定（黄色阈值 / 六边形网格几何）')
+            self.save_detect_debug([], tag='no_cells')
+
+    def save_detect_debug(self, cells: list, tag: str = 'fail'):
+        """
+        把「掩码 + 判定结果」落盘，方便下次直接看图标定，不用再人工截屏。
+
+        颜色约定：
+          · 洋红 = 判成"高亮描边"的像素（YELLOW_RG / YELLOW_B 这两个阈值的效果）
+          · 绿圈 = 最终认定的高亮格（会被点击的位置）
+          · 黄圈 = 竖边配对上了、但被斜边验证否掉的候选（多半是已攻克格）
+          · 蓝线 = 检测到的竖直边（带上下端点，斜边验证就是从这里推的）
+
+        写到 ./log/ 下（该目录已在 .gitignore 里），固定文件名、覆盖式，不会堆垃圾。
+        """
+        try:
+            import cv2
+            image = self.device.image
+            if image is None:
+                return
+            image = image.copy()
+            mask = self._yellow_mask(image)
+            image[mask] = (0.35 * image[mask] + 0.65 * np.array([255, 0, 255])).astype(np.uint8)
+            for x, top, bottom in self._last_edges:
+                cv2.line(image, (int(x), int(top)), (int(x), int(bottom)), (255, 80, 0), 2)
+            for x, y, _reason in self._last_rejected:
+                cv2.circle(image, (int(x), int(y)), 12, (0, 220, 255), 2)
+            for x, y in cells:
+                cv2.circle(image, (int(x), int(y)), 10, (0, 255, 0), 3)
+
+            folder = './log'
+            os.makedirs(folder, exist_ok=True)
+            path = f'{folder}/ffs_detect_{tag}.png'
+            # device.image 是 RGB，cv2.imwrite 按 BGR 落盘，必须转一下
+            # （不转的话整张图红蓝对调，高亮黄会变成青色，看图会看歪）
+            cv2.imwrite(path, cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
+            logger.info(f'高亮格检测调试图已保存：{path}')
+        except Exception as e:
+            logger.warning(f'保存高亮格检测调试图失败：{e}')
 
     def banquet_not_open(self) -> bool:
         """
@@ -536,10 +602,11 @@ class ScriptTask(RightActivity, GeneralBattle, SwitchSoul, FightForShikigamiAsse
         实测点击「八百八狸盛宴」后有一段镜头自动移动的动画，
         动画期间截图会拿到中间帧，检测出来的格子是错的。
 
-        :return: 停稳后的高亮格列表；超时则返回最后一次的检测结果
+        :return: 停稳后的高亮格列表；超时则返回"最后检出过"的结果
         """
         timer = Timer(timeout).start()
         last = None
+        last_non_empty = None
         while 1:
             self.screenshot()
 
@@ -549,13 +616,22 @@ class ScriptTask(RightActivity, GeneralBattle, SwitchSoul, FightForShikigamiAsse
                 return []
 
             cells = self.detect_highlight_cells()
+            if cells:
+                last_non_empty = cells
             if cells and self.cells_similar(cells, last):
                 logger.info(f'地图已停稳，高亮格：{cells}')
                 return cells
             last = cells
             if timer.reached():
-                logger.warning(f'等待地图停稳超时（{timeout}s），按当前结果继续')
-                return cells or []
+                if cells:
+                    logger.warning(f'等待地图停稳超时（{timeout}s），按当前结果继续')
+                    return cells
+                # 超时时这一帧没检出格子：多半是镜头还在动 / 截图糊了。
+                # 不能把"这一帧没检测到"直接当成"没有可打的格子"（那会误收工），
+                # 退回本轮里最后检出过的结果。
+                logger.warning(f'等待地图停稳超时（{timeout}s）且本帧没检出格子，'
+                               f'退回本轮上一次检出的结果：{last_non_empty}')
+                return last_non_empty or []
             sleep(interval)
 
     # ------------------------------------------------------------------
@@ -565,85 +641,202 @@ class ScriptTask(RightActivity, GeneralBattle, SwitchSoul, FightForShikigamiAsse
         """
         在地图上找出高亮（可攻击）格子的中心点。
 
-        原理：高亮格的六条边是亮黄色，其中左右两条是**竖直边**（长约 80px）。
-        同排相邻格的竖直边是共享的，所以两个相距 HEX_COL_STEP 的竖直边
-        就围出一个格子 —— 一条边既可能是左边格子的右边，也可能是右边格子的左边，
-        因此每条边可以参与两次配对，不能去重。
+        ⚠️ 核心：六边形的边是**左右 / 斜向相邻的两个格子共用**的。
+        所以"找到两条相距 168 的亮竖边"完全不能说明中间那格是高亮格 ——
+        它只能说明**它左右的邻居**是高亮格（共用边跟着一起亮）。
+
+        2026-10-03 实机翻车案例（用户标注图 + 日志 2026-10-03_oas1.txt:8297）：
+          · (640,135) 和 (976,135) 是高亮格，(808,135) 是**已攻克**格；
+          · 旧算法把 (808,135) 报成高亮格 —— 它左右两条竖边因为两边邻居高亮而发亮；
+          · 同时漏掉 (640,135) —— 它的左竖边在旧阈值下只剩 35px 连续段被丢弃。
+          结果 6 个"高亮格"里 4 个点下去没反应 → "所有高亮格都无法进入战斗"。
+
+        现在的判据分两步：
+          1. 按列找亮黄竖段，聚成"竖直边"（记下 x / 顶端 y / 底端 y）；
+          2. 两条相距 ≈168、高度相近的竖边配成一个**候选格**后，
+             再验证这个格**自己的四条斜边**：
+             斜边从竖边的端点向格子中线斜上 / 斜下汇聚，rise ≈ 0.22 × 格宽。
+             要求**每条竖边至少有一侧斜边是亮的**。
+             （斜边跑出地图可视区，例如顶部公告栏以上，算"不可判"，不参与否决。）
+
+          这样，夹在两个高亮格中间的非高亮格会因为**自己的一条斜边是暗的**被拒掉；
+          而真正的高亮格即使被小队 / 建筑压住一两条边，也还能靠另一侧的斜边通过
+          —— 用户口径：高亮上的小人是"正在攻打"，不影响判断。
 
         :return: [(x, y), ...] 格心坐标，按 y 再按 x 排序（优先打靠上的）
         """
         image = self.device.image
         if image is None:
             return []
-        height, width = image.shape[:2]
 
+        mask = self._yellow_mask(image)
+        edges = self._vertical_edges(mask)
+        self._last_edges = tuple((e['x'], e['top'], e['bottom']) for e in edges)
+        rejected = []
+        self._last_rejected = rejected
+        if len(edges) < 2:
+            logger.info(f'未检测到足够的竖直黄边（{len(edges)} 条）')
+            return []
+
+        candidates = []
+        for i in range(len(edges)):
+            for j in range(i + 1, len(edges)):
+                e1, e2 = edges[i], edges[j]
+                dx = e2['x'] - e1['x']
+                if abs(dx - self.HEX_COL_STEP) > self.HEX_PAIR_DX_TOL:
+                    continue
+                cy1 = (e1['top'] + e1['bottom']) / 2
+                cy2 = (e2['top'] + e2['bottom']) / 2
+                if abs(cy1 - cy2) > self.HEX_PAIR_DY_TOL:
+                    continue
+
+                # 用候选格自己的竖边端点推局部几何（地图有透视，不能套固定值）
+                rise = self.HEX_RISE_RATIO * dx
+                xm = (e1['x'] + e2['x']) / 2
+                ym = (cy1 + cy2) / 2
+                slants = {
+                    'BL': self._line_hit(mask, (e1['x'], e1['bottom']), (xm, e1['bottom'] + rise)),
+                    'TL': self._line_hit(mask, (e1['x'], e1['top']), (xm, e1['top'] - rise)),
+                    'BR': self._line_hit(mask, (e2['x'], e2['bottom']), (xm, e2['bottom'] + rise)),
+                    'TR': self._line_hit(mask, (e2['x'], e2['top']), (xm, e2['top'] - rise)),
+                }
+                vert_l = self._line_hit(mask, (e1['x'], e1['top']), (e1['x'], e1['bottom']))[0]
+                vert_r = self._line_hit(mask, (e2['x'], e2['top']), (e2['x'], e2['bottom']))[0]
+                if vert_l < self.HEX_VERT_MIN or vert_r < self.HEX_VERT_MIN:
+                    rejected.append((xm, ym, f'竖边偏暗 {vert_l:.2f}/{vert_r:.2f}'))
+                    continue
+
+                left = self._slant_support(slants, 'TL', 'BL')
+                right = self._slant_support(slants, 'TR', 'BR')
+                if left is not None and left < self.HEX_SLANT_BRIGHT:
+                    logger.debug(f'({xm:.0f},{ym:.0f}) 左竖边无亮斜边（{left:.2f}）→ 判为已攻克')
+                    rejected.append((xm, ym, f'左斜边暗 {left:.2f}'))
+                    continue
+                if right is not None and right < self.HEX_SLANT_BRIGHT:
+                    logger.debug(f'({xm:.0f},{ym:.0f}) 右竖边无亮斜边（{right:.2f}）→ 判为已攻克')
+                    rejected.append((xm, ym, f'右斜边暗 {right:.2f}'))
+                    continue
+
+                candidates.append((xm, ym))
+
+        if not candidates:
+            return []
+
+        # 同一格会因为竖边被截断而配出多个相近候选（实测同一格 y 差 20+px），
+        # 按距离合并成一组，取组内均值当格心。
+        # 组容差 40 < 行距(~110) / 列距(168)，不会把两个不同的格子并到一起。
+        candidates.sort(key=lambda c: (c[1], c[0]))
+        groups = []
+        for cand in candidates:
+            for grp in groups:
+                if abs(cand[0] - grp[0][0]) <= 40 and abs(cand[1] - grp[0][1]) <= 40:
+                    grp.append(cand)
+                    break
+            else:
+                groups.append([cand])
+
+        cells = sorted({(int(round(sum(c[0] for c in g) / len(g))),
+                         int(round(sum(c[1] for c in g) / len(g)))) for g in groups},
+                       key=lambda c: (c[1], c[0]))
+        return cells
+
+    def _yellow_mask(self, image):
+        """高亮描边的颜色掩码：R+G > YELLOW_RG 且 B < YELLOW_B。"""
         r = image[:, :, 0].astype(np.int16)
         g = image[:, :, 1].astype(np.int16)
         b = image[:, :, 2].astype(np.int16)
-        mask = (r + g > self.YELLOW_RG) & (b < self.YELLOW_B)
+        return (r + g > self.YELLOW_RG) & (b < self.YELLOW_B)
 
+    def _vertical_edges(self, mask) -> list:
+        """
+        按列找亮黄竖段，再把相邻列、y 区间重叠的段聚成一条"竖直边"。
+
+        不写成"一列一个连续段"：高亮描边有 3~15px 辉光、还会被装饰物压住，
+        所以允许 HEX_EDGE_GAP 的断口；聚成边之后顺带拿到这条边的上下端点，
+        斜边验证要用它当锚点。
+
+        :return: [{'x': 边中心 x, 'top': 顶端 y, 'bottom': 底端 y, 'columns': 列数}]
+        """
+        height, width = mask.shape[:2]
         top = max(0, self.MAP_TOP)
         bottom = min(height, self.MAP_BOTTOM)
         left = max(0, self.MAP_LEFT)
         right = min(width, self.MAP_RIGHT)
 
-        # 1. 收集竖直黄边（按列找长度合适的连续段）
-        edges = []
+        runs = []
         for x in range(left, right):
-            ys = np.flatnonzero(mask[top:bottom, x])
+            ys = np.flatnonzero(mask[top:bottom, x]) + top
             if ys.size == 0:
                 continue
-            breaks = np.flatnonzero(np.diff(ys) > 1) + 1
+            breaks = np.flatnonzero(np.diff(ys) > self.HEX_EDGE_GAP + 1) + 1
             for seg in np.split(ys, breaks):
                 if self.HEX_EDGE_MIN <= seg.size <= self.HEX_EDGE_MAX:
-                    edges.append((x, float(seg[0] + seg[-1]) / 2.0 + top))
-        if not edges:
-            logger.info('未检测到竖直黄边')
+                    runs.append((x, int(seg[0]), int(seg[-1])))
+        if not runs:
             return []
 
-        # 2. 把属于同一条竖边的列合并成一个点。
-        #
-        #    不能只做一趟顺序扫描：同一列里可能同时有上下两条边，
-        #    顺序扫描时它们会交错排列，把本该配对的两条边隔开。
-        #    实测出现 x=811 与 x=812 各留两条（y≈239 和 y≈474），
-        #    最终产出相距 2px 的"两个格子"。所以这里按 (x, y) 聚类。
-        groups = []
-        for edge in edges:
-            for grp in groups:
-                gx = sum(e[0] for e in grp) / len(grp)
-                gy = sum(e[1] for e in grp) / len(grp)
-                if (abs(edge[0] - gx) <= self.HEX_EDGE_MERGE_GAP
-                        and abs(edge[1] - gy) <= self.HEX_EDGE_MERGE_DY):
-                    grp.append(edge)
+        runs.sort()
+        clusters = []
+        for x, y_top, y_bottom in runs:
+            for grp in clusters:
+                overlap = min(y_bottom, grp['bottom']) - max(y_top, grp['top'])
+                if (x - grp['x_right'] <= self.HEX_EDGE_MERGE_DX
+                        and overlap >= 0.5 * min(y_bottom - y_top,
+                                                 grp['bottom'] - grp['top'])):
+                    grp['xs'].append(x)
+                    grp['tops'].append(y_top)
+                    grp['bottoms'].append(y_bottom)
+                    grp['x_right'] = max(grp['x_right'], x)
+                    grp['top'] = min(grp['top'], y_top)
+                    grp['bottom'] = max(grp['bottom'], y_bottom)
                     break
             else:
-                groups.append([edge])
-        edge_list = [(sum(e[0] for e in grp) / len(grp), sum(e[1] for e in grp) / len(grp))
-                     for grp in groups]
-        if len(edge_list) < 2:
-            return []
+                clusters.append(dict(xs=[x], tops=[y_top], bottoms=[y_bottom],
+                                     x_right=x, top=y_top, bottom=y_bottom))
 
-        # 3. 配成格子
-        cells = []
-        for i in range(len(edge_list)):
-            for j in range(i + 1, len(edge_list)):
-                dx = edge_list[j][0] - edge_list[i][0]
-                dy = abs(edge_list[j][1] - edge_list[i][1])
-                if (abs(dx - self.HEX_COL_STEP) <= self.HEX_PAIR_DX_TOL
-                        and dy <= self.HEX_PAIR_DY_TOL):
-                    cells.append((int((edge_list[i][0] + edge_list[j][0]) / 2),
-                                  int((edge_list[i][1] + edge_list[j][1]) / 2)))
+        return [dict(x=float(np.mean(grp['xs'])),
+                     top=float(np.median(grp['tops'])),
+                     bottom=float(np.median(grp['bottoms'])),
+                     columns=len(grp['xs']))
+                for grp in clusters if len(grp['xs']) >= self.HEX_EDGE_MIN_COLS]
 
-        # 去重并排序，优先打靠上的。
-        # 注意：配对时同一个格子可能产出多个相近结果（实测出现过相距 2px 的"两个格子"），
-        # 会把同一个位置当成多个目标重复点，所以必须按距离合并。
-        cells = sorted(set(cells), key=lambda c: (c[1], c[0]))
-        unique = []
-        for cell in cells:
-            if any(abs(cell[0] - u[0]) <= 40 and abs(cell[1] - u[1]) <= 40 for u in unique):
+    def _line_hit(self, mask, p1, p2) -> tuple:
+        """
+        沿线段 p1->p2 采样，返回 (命中率, 有效采样率)。
+
+        线宽 / 辉光有 3~15px 抖动，所以采样点取 ±HEX_SAMPLE_WIN 邻域内是否**存在**亮像素。
+        落在地图可视区外（顶部公告栏、底部按钮、左右 UI）的采样点算"无效"，
+        有效采样率用来判断这条边到底能不能判 —— 第 1 排格子的上斜边就在公告栏后面。
+        """
+        win = self.HEX_SAMPLE_WIN
+        height, width = mask.shape[:2]
+        hit = valid = 0
+        for t in np.linspace(0.08, 0.92, self.HEX_SAMPLE_N):
+            x = int(round(p1[0] + (p2[0] - p1[0]) * t))
+            y = int(round(p1[1] + (p2[1] - p1[1]) * t))
+            if not (self.MAP_TOP <= y < self.MAP_BOTTOM
+                    and self.MAP_LEFT <= x < self.MAP_RIGHT):
                 continue
-            unique.append(cell)
-        return unique
+            if not (win <= x < width - win and win <= y < height - win):
+                continue
+            valid += 1
+            if mask[y - win:y + win + 1, x - win:x + win + 1].any():
+                hit += 1
+        if valid == 0:
+            return 0.0, 0.0
+        return hit / valid, valid / self.HEX_SAMPLE_N
+
+    def _slant_support(self, slants: dict, key_a: str, key_b: str):
+        """
+        一条竖边两侧斜边的证据。
+
+        :return: 有效斜边里的最高命中率；两条都不可判（都在可视区外）时返回 None
+        """
+        evidence = [slants[k][0] for k in (key_a, key_b)
+                    if slants[k][1] >= self.HEX_COVER_MIN]
+        if not evidence:
+            return None
+        return max(evidence)
 
 
 if __name__ == '__main__':
