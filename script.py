@@ -56,6 +56,9 @@ class Script:
         # 启动时那次"跳过 Restart"只做一次。
         # 不这样做的话: 跳过分支之后 Restart 仍然 pending, 会被反复推迟 / 或者空转刷日志。
         self._restart_deferred_from_startup = False
+        # 任务报错触发的重启(见 task_call_restart)。这类 Restart 不能被上面的"启动跳过"吞掉:
+        # 2026-10-03 19:42 首领退治卡死时 Restart 被推迟一周, 游戏没重启, 任务原地又跑一遍。
+        self._restart_from_error = False
         # Failure count of tasks
         # Key: str, task name, value: int, failure count
         self.failure_record = {}
@@ -538,6 +541,16 @@ class Script:
             self.config.task_call('SoulsTidy')
             time.sleep(1)
 
+    def task_call_restart(self) -> None:
+        """任务报错后请求重启游戏(而不是单纯重排任务)
+
+        NOTE 必须和"启动时跳过 Restart"区分开: 那个跳过是为了不在进程刚起来时
+             停/起游戏, 但错误触发的重启是"卡死自救"的唯一手段。被吞掉的话就变成
+             "卡死 -> 原地重跑 -> 再卡死"(2026-10-03 19:42 首领退治连跑 22 分钟一轮)。
+        """
+        self._restart_from_error = True
+        self.config.task_call('Restart')
+
     def run(self, command: str) -> bool:
         """
         :param command:  大写驼峰命名的任务名字
@@ -571,7 +584,7 @@ class Script:
         except GameNotRunningError as e:
             logger.warning(e)
             self.exception_handler(e=e, command=command)
-            self.config.task_call('Restart')
+            self.task_call_restart()
             return True
         except (GameStuckError, GameTooManyClickError) as e:
             logger.error(e)
@@ -580,7 +593,7 @@ class Script:
             logger.warning(f'Game stuck, {self.device.package} will be restarted in 10 seconds')
             logger.warning('If you are playing by hand, please stop Alas')
             self.config.notifier.push(title=f'{I18n.trans_zh_cn(command)}{command}', content=f"<{self.config_name}> GameStuckError or GameTooManyClickError")
-            self.config.task_call('Restart')
+            self.task_call_restart()
             self.device.sleep(10)
             return False
         except GameBugError as e:
@@ -589,7 +602,7 @@ class Script:
             self.exception_handler(e=e, command=command)
             logger.warning('An error has occurred in Azur Lane game client, Alas is unable to handle')
             logger.warning(f'Restarting {self.device.package} to fix it')
-            self.config.task_call('Restart')
+            self.task_call_restart()
             self.device.sleep(10)
             return False
         except GamePageUnknownError as e:
@@ -599,7 +612,7 @@ class Script:
             self.save_error_log()
             self.exception_handler(e=e, command=command)
             self.config.notifier.push(title=f'{I18n.trans_zh_cn(command)}{command}', content=f"<{self.config_name}> GamePageUnknownError")
-            self.config.task_call('Restart')
+            self.task_call_restart()
             self.device.sleep(10)
             return False
         except ScriptError as e:
@@ -671,8 +684,10 @@ class Script:
             # 启动时如果 Restart 就是待办(没勾"定时重启"), 不要立刻停/起游戏做那次登录重启:
             # 直接把它推到一周后。只需要推一次, 之后无论是时间到了还是被调用,
             # 都正常执行, 执行完由 app_restart 再排到一周后。
+            # NOTE 任务报错触发的 Restart(self.task_call_restart) 不跳过 —— 那是卡死自救。
             if task == 'Restart' and not self.config.restart.scheduler.schedule \
-                    and not self._restart_deferred_from_startup:
+                    and not self._restart_deferred_from_startup \
+                    and not self._restart_from_error:
                 self._restart_deferred_from_startup = True
                 logger.info('Skip task `Restart` at scheduler start, defer 1 week')
                 self.config.task_delay(task='Restart', server=False,
@@ -688,6 +703,9 @@ class Script:
 
             # Run
             logger.info(f'Scheduler: Start task `{task}`')
+            if task == 'Restart' and self._restart_from_error:
+                # 这次"错误触发的重启"已经用掉, 恢复成正常逻辑
+                self._restart_from_error = False
             self.device.stuck_record_clear()
             self.device.click_record_clear()
             logger.hr(task, level=0)

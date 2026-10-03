@@ -12,6 +12,7 @@ import re
 import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -319,9 +320,16 @@ def test_all_task_compositions_can_be_instantiated():
     from module.base.utils import load_module
 
     repo = REPO_DIR
+    # 用真实配置对象: BaseTask 的各个 mixin(CostumeBase 等)真的会读 config 字段。
+    # NOTE 必须是"长得像 Config"的对象: BaseTask.__init__ 读 self.config.global_game,
+    #      上游 Costume 提交后 get_task_name() 还会读 self.config.model.running_task。
     # 用真实配置对象: BaseTask 的各个 mixin(CostumeBase 等)真的会读 config 字段
+    # (self.config.global_game / self.config.model.running_task ...), 手搓 stub 跟不上,
+    # 直接用 Config(本模块有隔离 config 目录的 fixture)。
+    from module.config.config import Config
+
     forward = MagicMock()
-    forward.config = ConfigModel('template')
+    forward.config = Config('template')
     forward.device = MagicMock()
 
     tasks = ['Harvest', 'Restart', 'DailyTrifles', 'KekkaiUtilize', 'Delegation', 'Dokan']
@@ -361,6 +369,39 @@ def test_restart_startup_skip_defers_one_week_exactly_once():
     assert '_restart_deferred_from_startup = False' in text
     # 已经不再依赖 is_first_task
     assert 'is_first_task' not in text, 'is_first_task 只在真正跑过任务后才变 False, 是循环的根源'
+
+
+def test_restart_from_error_is_not_swallowed_by_startup_skip():
+    """回归: 任务报错触发的 Restart 不能被"启动跳过"吞掉
+
+    踩过的坑(2026-10-03 19:42, oas1 首领退治):
+      退治卡死 -> GameStuckError -> task_call('Restart') -> 被这条"启动时跳过 Restart,
+      推迟一周"吞掉 -> 游戏没重启 -> 退治原地又跑一遍(22 分钟), 一轮接一轮地空跑。
+    所以: 错误触发的重启要打标记(_restart_from_error), 跳过分支必须尊重它。
+    """
+    text = (REPO_DIR / 'script.py').read_text(encoding='utf-8')
+
+    # 1) 四个错误分支都走 task_call_restart()(而不是直接 config.task_call('Restart'))
+    assert 'def task_call_restart(self)' in text, '缺少"错误触发的重启"入口'
+    assert text.count('self.task_call_restart()') >= 4, \
+        f'错误分支没有全部标记: {text.count("self.task_call_restart()")} 处'
+    code_lines = [line for line in text.splitlines() if not line.strip().startswith('#')]
+    direct = [line for line in code_lines if "self.config.task_call('Restart')" in line]
+    assert len(direct) == 1, f'除 task_call_restart 里那句外还有直接调用: {direct}'
+
+    m = re.search(
+        r"if task == 'Restart' and not self\.config\.restart\.scheduler\.schedule(.*?)\n\n",
+        text,
+        re.S,
+    )
+    assert m, '找不到启动时跳过 Restart 的分支'
+    code = '\n'.join(line for line in m.group(1).splitlines() if not line.strip().startswith('#'))
+
+    # 2) 跳过分支同时要求"不是错误触发的重启"
+    assert '_restart_from_error' in code, '错误触发的 Restart 还是会被吞掉'
+    # 3) 标记的初始化与"用掉"
+    assert 'self._restart_from_error = False' in text, '缺少标记初始化/复位'
+    assert 'self._restart_from_error = True' in text, 'task_call_restart 没有打标记'
 
 
 def test_restart_schedule_off_defers_one_week_not_tomorrow():

@@ -81,10 +81,14 @@ class BaseTask(GlobalGameAssets, CostumeBase):
         )
 
         if model_task_name and model_task_name != path_task_name:
-            raise ScriptError(
-                f'Task name mismatch: model={model_task_name}, path={path_task_name}'
-            )
-        return model_task_name or path_task_name
+            # 任务内部复用别的任务类时会走到这里(例如 Restart 登录后调 HarvestHandler 收菜:
+            # 类文件在 tasks/Harvest/ 而 running_task 是 Restart)。
+            # 这里以前是 raise ScriptError, 而 script.py 的 except ScriptError 会 exit(1) ——
+            # 2026-10-03 20:06/20:15 oas1/oas2 都是在"重启后收菜"这一步整个进程退出的。
+            # 改为只警告, 并按类自己的名字(取皮肤用)继续。
+            logger.warning(f'Task name mismatch: model={model_task_name}, path={path_task_name}, '
+                           f'use {path_task_name}')
+        return path_task_name or model_task_name
 
     def _burst(self) -> bool:
         """
